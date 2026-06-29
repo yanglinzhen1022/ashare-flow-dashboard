@@ -115,8 +115,9 @@ async def test_history_cache_cleared_on_new_day():
     }
     fetcher.last_date = "2026-06-28"
     
-    with patch("time.strftime") as mock_strftime:
-        mock_strftime.return_value = "2026-06-29"
+    with patch("app.scheduler.datetime") as mock_datetime:
+        # Mock datetime.now(cst_tz).strftime("%Y-%m-%d") to return "2026-06-29"
+        mock_datetime.now.return_value.strftime.return_value = "2026-06-29"
         
         fetcher._update_history_cache("09:31", [{"code": "BK0437", "main_net_inflow": 2.5}])
         
