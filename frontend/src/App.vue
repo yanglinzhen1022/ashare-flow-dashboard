@@ -57,10 +57,12 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ChartEngine } from './charts.js'
 
 const wsStatus = ref('connecting') // connecting, connected, disconnected
 const currentTime = ref('')
 const socket = ref(null)
+const engine = ref(null)
 
 const wsStatusText = computed(() => {
   if (wsStatus.value === 'connecting') return '连接中 🟡'
@@ -104,9 +106,43 @@ const connectWS = () => {
   socket.value.onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data)
-      if (payload.type === 'flow_update') {
-        // 在后续任务中进行真正的图表绑定渲染
-        window.handleFlowUpdate && window.handleFlowUpdate(payload.data)
+      if (payload.type === 'flow_update' && engine.value && !isUnmounted) {
+        const allSectors = [...payload.data.industry, ...payload.data.concept]
+        
+        // 1. 渲染热力图
+        engine.value.renderTreeMap(allSectors)
+        // 2. 渲染排行榜
+        engine.value.renderRankList(allSectors)
+        
+        // 3. 更新折线走势图的缓存记录
+        const currentMin = payload.data.timestamp.substring(0, 5) // "HH:MM"
+        for (const s of allSectors) {
+          const code = s.code
+          if (!engine.value.historyData[code]) {
+            engine.value.historyData[code] = { timestamps: [], values: [] }
+          }
+          const timestamps = engine.value.historyData[code].timestamps
+          if (!timestamps || timestamps[timestamps.length - 1] !== currentMin) {
+            engine.value.historyData[code].timestamps.push(currentMin)
+            engine.value.historyData[code].values.push(s.main_net_inflow)
+          } else {
+            engine.value.historyData[code].values[timestamps.length - 1] = s.main_net_inflow
+          }
+        }
+        
+        // 4. 如果当前选中了板块，则更新其饼图与折线图
+        if (engine.value.selectedSectorCode) {
+          const target = allSectors.find(s => s.code === engine.value.selectedSectorCode)
+          if (target) {
+            engine.value.renderPieChart(target)
+          }
+          engine.value.renderLineChart()
+        } else if (allSectors.length > 0) {
+          // 默认初始加载时选中第1个板块展示结构
+          engine.value.selectedSectorCode = allSectors[0].code
+          engine.value.renderPieChart(allSectors[0])
+          engine.value.renderLineChart()
+        }
       }
     } catch (err) {
       console.error('解析推送包错误:', err)
@@ -125,7 +161,14 @@ const connectWS = () => {
 
 let clockInterval = null
 
-onMounted(() => {
+onMounted(async () => {
+  // 实例化图表引擎并绑定 Dom 元素
+  engine.value = new ChartEngine()
+  engine.value.initCharts()
+  
+  // 异步拉取今日历史走势数据
+  await engine.value.loadHistoryData()
+
   connectWS()
   updateTime()
   clockInterval = setInterval(updateTime, 1000)
@@ -145,6 +188,10 @@ onUnmounted(() => {
   if (socket.value) {
     socket.value.onclose = null
     socket.value.close()
+  }
+  if (engine.value) {
+    engine.value.destroy()
+    engine.value = null
   }
 })
 </script>
