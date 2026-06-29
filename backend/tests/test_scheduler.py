@@ -139,18 +139,58 @@ def test_unsafe_dictionary_default_handling():
             "f72": None,
             "f78": None,
             "f84": None
+        },
+        {
+            "f12": "BK0437",
+            "f14": "半导体",
+            "f3": "-",
+            "f62": "NaN",
+            "f66": "123.45",
+            "f72": None,
+            "f78": "-",
+            "f84": "NaN"
         }
     ]
     
     formatted = fetcher._format_items(bad_items)
-    assert len(formatted) == 1
-    item = formatted[0]
-    assert item["code"] == ""
-    assert item["name"] == ""
-    assert item["change_pct"] == 0.0
-    assert item["main_net_inflow"] == 0.0
-    assert item["super_large_inflow"] == 0.0
-    assert item["large_inflow"] == 0.0
-    assert item["medium_inflow"] == 0.0
-    assert item["small_inflow"] == 0.0
+    assert len(formatted) == 2
+    
+    item1 = formatted[0]
+    assert item1["code"] == ""
+    assert item1["name"] == ""
+    assert item1["change_pct"] == 0.0
+    assert item1["main_net_inflow"] == 0.0
+    assert item1["super_large_inflow"] == 0.0
+    assert item1["large_inflow"] == 0.0
+    assert item1["medium_inflow"] == 0.0
+    assert item1["small_inflow"] == 0.0
+
+    item2 = formatted[1]
+    assert item2["code"] == "BK0437"
+    assert item2["name"] == "半导体"
+    assert item2["change_pct"] == 0.0
+    assert item2["main_net_inflow"] == 0.0
+    assert item2["super_large_inflow"] == 0.0
+    assert item2["large_inflow"] == 0.0
+    assert item2["medium_inflow"] == 0.0
+    assert item2["small_inflow"] == 0.0
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_client():
+    mock_manager = AsyncMock(spec=ConnectionManager)
+    fetcher = DataFetcher(mock_manager)
+    fetcher.client = AsyncMock()
+    
+    await fetcher.shutdown()
+    fetcher.client.aclose.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_shutdown_with_none_client():
+    mock_manager = AsyncMock(spec=ConnectionManager)
+    fetcher = DataFetcher(mock_manager)
+    fetcher.client = None
+    
+    # Should not raise any error
+    await fetcher.shutdown()
+
 

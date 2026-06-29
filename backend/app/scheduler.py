@@ -1,16 +1,19 @@
 import asyncio
+from datetime import datetime, timezone, timedelta
 import httpx
 import time
 from typing import Dict, List
 from app.config import Config
 from app.manager import ConnectionManager
 
+cst_tz = timezone(timedelta(hours=8))
+
 class DataFetcher:
     def __init__(self, manager: ConnectionManager):
         self.manager = manager
         self.latest_data: Dict = {"industry": [], "concept": []}
         self.history_cache: Dict[str, Dict] = {} # 存储今日开盘以来的每分钟历史走势
-        self.last_date = time.strftime("%Y-%m-%d", time.localtime())
+        self.last_date = datetime.now(cst_tz).strftime("%Y-%m-%d")
         self.client = None
 
     async def fetch_and_broadcast(self) -> Dict:
@@ -60,14 +63,15 @@ class DataFetcher:
             print(f"数据抓取失败: {e}")
             return self.latest_data
             
+        now_cst = datetime.now(cst_tz)
         self.latest_data = {
-            "timestamp": time.strftime("%H:%M:%S", time.localtime()),
+            "timestamp": now_cst.strftime("%H:%M:%S"),
             "industry": formatted_industry,
             "concept": formatted_concept
         }
         
         # 更新历史折线图缓存 (根据当前分钟记录主力资金累计额)
-        current_min = time.strftime("%H:%M", time.localtime())
+        current_min = now_cst.strftime("%H:%M")
         self._update_history_cache(current_min, formatted_industry + formatted_concept)
         
         # 广播给全部连接客户端
@@ -79,6 +83,17 @@ class DataFetcher:
         await self.manager.broadcast(payload)
         return self.latest_data
 
+    def _safe_float(self, val) -> float:
+        if val is None:
+            return 0.0
+        try:
+            f = float(val)
+            if f != f:  # Check for NaN
+                return 0.0
+            return f
+        except (ValueError, TypeError):
+            return 0.0
+
     def _format_items(self, items: List[Dict]) -> List[Dict]:
         result = []
         to_yicang = 100000000.0
@@ -86,17 +101,17 @@ class DataFetcher:
             result.append({
                 "code": item.get("f12") or "",
                 "name": item.get("f14") or "",
-                "change_pct": item.get("f3") or 0.0,
-                "main_net_inflow": round((item.get("f62") or 0.0) / to_yicang, 2),
-                "super_large_inflow": round((item.get("f66") or 0.0) / to_yicang, 2),
-                "large_inflow": round((item.get("f72") or 0.0) / to_yicang, 2),
-                "medium_inflow": round((item.get("f78") or 0.0) / to_yicang, 2),
-                "small_inflow": round((item.get("f84") or 0.0) / to_yicang, 2),
+                "change_pct": self._safe_float(item.get("f3")),
+                "main_net_inflow": round(self._safe_float(item.get("f62")) / to_yicang, 2),
+                "super_large_inflow": round(self._safe_float(item.get("f66")) / to_yicang, 2),
+                "large_inflow": round(self._safe_float(item.get("f72")) / to_yicang, 2),
+                "medium_inflow": round(self._safe_float(item.get("f78")) / to_yicang, 2),
+                "small_inflow": round(self._safe_float(item.get("f84")) / to_yicang, 2),
             })
         return result
 
     def _update_history_cache(self, current_min: str, all_sectors: List[Dict]):
-        current_date = time.strftime("%Y-%m-%d", time.localtime())
+        current_date = datetime.now(cst_tz).strftime("%Y-%m-%d")
         if current_date != self.last_date:
             self.history_cache.clear()
             self.last_date = current_date
@@ -120,3 +135,8 @@ class DataFetcher:
         while True:
             await self.fetch_and_broadcast()
             await asyncio.sleep(Config.POLL_INTERVAL_SECONDS)
+
+    async def shutdown(self):
+        """优雅关闭 HTTP 客户端"""
+        if self.client is not None:
+            await self.client.aclose()
