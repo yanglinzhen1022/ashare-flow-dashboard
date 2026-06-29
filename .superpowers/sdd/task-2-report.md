@@ -84,3 +84,25 @@ backend/tests/test_scheduler.py ...                                      [100%]
 ============================== 5 passed in 0.22s ===============================
 ```
 
+## Task 2 Second Re-Review Fix Report (2026-06-29)
+
+### What was fixed
+1. **Stale History Cache Accumulation (`backend/app/scheduler.py`):**
+   - Added `self.last_date` initialization in `__init__`.
+   - In `_update_history_cache`, compared the current date with `self.last_date`. If they differ (indicating a new trading day), cleared `self.history_cache` and updated `self.last_date`.
+2. **Unsafe Dictionary Default Handling (`backend/app/scheduler.py`):**
+   - Changed format parsing to use the `(item.get("fXX") or 0.0)` (and `or ""`) pattern in `_format_items` to protect against explicit `null` values returned by the Eastmoney API, preventing potential `TypeError` on division or formatting.
+3. **Verification Tests (`backend/tests/test_scheduler.py`):**
+   - Added `test_history_cache_cleared_on_new_day` to verify that `history_cache` is cleared when the date changes.
+   - Added `test_unsafe_dictionary_default_handling` to verify that `_format_items` correctly handles `None` values by falling back to safe defaults without throwing exceptions.
+
+### Test Command
+```bash
+python3 -m pytest
+```
+
+### Test Output
+```
+============================== 7 passed in 0.27s ===============================
+```
+
