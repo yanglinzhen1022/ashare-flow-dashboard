@@ -20,3 +20,23 @@ async def test_connection_lifecycle():
     # 测试断开连接
     manager.disconnect(mock_ws)
     assert mock_ws not in manager.active_connections
+
+@pytest.mark.asyncio
+async def test_broadcast_failure_cleanup():
+    manager = ConnectionManager()
+    mock_ws_success = AsyncMock(spec=WebSocket)
+    mock_ws_fail = AsyncMock(spec=WebSocket)
+    mock_ws_fail.send_json.side_effect = Exception("Send failed")
+    
+    await manager.connect(mock_ws_success)
+    await manager.connect(mock_ws_fail)
+    
+    assert len(manager.active_connections) == 2
+    
+    test_msg = {"type": "test", "data": "hello"}
+    await manager.broadcast(test_msg)
+    
+    # The failed socket should be removed, but the successful one remains
+    assert mock_ws_fail not in manager.active_connections
+    assert mock_ws_success in manager.active_connections
+    mock_ws_success.send_json.assert_called_once_with(test_msg)
