@@ -43,13 +43,16 @@ export class ChartEngine {
     if (!this.treemapChart) return
 
     // TreeMap 数据节点构造
-    const data = allSectors.map(s => ({
-      name: `${s.name}\n${s.main_net_inflow > 0 ? '+' : ''}${s.main_net_inflow}亿\n${s.change_pct}%`,
-      value: [Math.abs(s.main_net_inflow), s.main_net_inflow], // 面积由流入或流出量绝对值代表大小 (index 0)，颜色映射由实际流入量决定 (index 1)
-      code: s.code,
-      flow: s.main_net_inflow,
-      details: s
-    }))
+    const data = allSectors.map(s => {
+      const ratio = s.turnover > 0 ? (s.main_net_inflow / s.turnover) * 100 : 0
+      return {
+        name: `${s.name}\n${s.main_net_inflow > 0 ? '+' : ''}${s.main_net_inflow}亿\n${s.change_pct}%`,
+        value: [s.turnover, ratio],
+        code: s.code,
+        flow: s.main_net_inflow,
+        details: s
+      }
+    })
 
     const option = {
       backgroundColor: 'transparent',
@@ -57,11 +60,14 @@ export class ChartEngine {
         formatter: (info) => {
           const d = info.data?.details
           if (!d) return ''
+          const ratio = d.turnover > 0 ? (d.main_net_inflow / d.turnover) * 100 : 0
           return `
             <div class="p-2 font-mono text-sm text-white">
               <b class="text-base">${d.name}</b> (${d.code})<br/>
               今日涨跌幅: <span style="color: ${d.change_pct >= 0 ? '#FF4D4F' : '#22C55E'};">${d.change_pct}%</span><br/>
               主力净流入: <span style="color: ${d.main_net_inflow >= 0 ? '#FF4D4F' : '#22C55E'};">${d.main_net_inflow} 亿</span><br/>
+              主力净流入占比: <span style="color: ${ratio >= 0 ? '#FF4D4F' : '#22C55E'};">${ratio.toFixed(2)}%</span><br/>
+              成交额: <span>${d.turnover.toFixed(2)} 亿</span><br/>
               <hr class="border-gray-800 my-1"/>
               超大单: ${d.super_large_inflow} 亿<br/>
               大单: ${d.large_inflow} 亿<br/>
@@ -73,8 +79,8 @@ export class ChartEngine {
       },
       visualMap: {
         show: false,
-        min: -10,
-        max: 10,
+        min: -15,
+        max: 15,
         dimension: 1,
         inRange: {
           color: ['#22C55E', '#1F2937', '#FF4D4F']
@@ -180,32 +186,7 @@ export class ChartEngine {
     this.pieChart.setOption(option, true)
   }
 
-  renderRankList(allSectors) {
-    const inflowDom = document.getElementById('inflow-ranking')
-    const outflowDom = document.getElementById('outflow-ranking')
-    if (!inflowDom || !outflowDom) return
 
-    const inflows = allSectors.filter(s => s.main_net_inflow > 0).sort((a, b) => b.main_net_inflow - a.main_net_inflow).slice(0, 10)
-    const outflows = allSectors.filter(s => s.main_net_inflow < 0).sort((a, b) => a.main_net_inflow - b.main_net_inflow).slice(0, 10)
-
-    // 绘制流入榜
-    inflowDom.innerHTML = inflows.map((item, idx) => `
-      <div class="flex justify-between items-center bg-gray-900/40 p-2 rounded border-l-4 border-stockRed font-mono text-sm">
-        <span class="text-gray-400 font-bold w-4">${idx + 1}</span>
-        <span class="text-gray-200 font-medium truncate w-16">${item.name}</span>
-        <span class="text-stockRed font-bold">+${item.main_net_inflow.toFixed(2)}亿</span>
-      </div>
-    `).join('')
-
-    // 绘制流出榜
-    outflowDom.innerHTML = outflows.map((item, idx) => `
-      <div class="flex justify-between items-center bg-gray-900/40 p-2 rounded border-l-4 border-stockGreen font-mono text-sm">
-        <span class="text-gray-400 font-bold w-4">${idx + 1}</span>
-        <span class="text-gray-200 font-medium truncate w-16">${item.name}</span>
-        <span class="text-stockGreen font-bold">${item.main_net_inflow.toFixed(2)}亿</span>
-      </div>
-    `).join('')
-  }
 
   destroy() {
     if (this.resizeHandler) {

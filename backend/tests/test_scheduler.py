@@ -17,6 +17,7 @@ async def test_data_fetch_and_formatting():
                     "f12": "BK0437",
                     "f14": "半导体",
                     "f3": 2.45,
+                    "f6": 5000000000.0, # 50 亿元
                     "f62": 1235000000.0, # 12.35 亿元
                     "f66": 810000000.0,
                     "f72": 425000000.0,
@@ -42,6 +43,7 @@ async def test_data_fetch_and_formatting():
         assert item["code"] == "BK0437"
         assert item["name"] == "半导体"
         assert item["change_pct"] == 2.45
+        assert item["turnover"] == 50.0
         assert item["main_net_inflow"] == 12.35
         assert item["super_large_inflow"] == 8.10
         assert item["large_inflow"] == 4.25
@@ -50,6 +52,12 @@ async def test_data_fetch_and_formatting():
         
         # 验证广播被触发
         mock_manager.broadcast.assert_called_once()
+        
+        # 验证广播payload包含"date"
+        args, kwargs = mock_manager.broadcast.call_args
+        payload = args[0]
+        assert "date" in payload
+        assert isinstance(payload["date"], str)
 
 @pytest.mark.asyncio
 async def test_data_fetch_client_reuse():
@@ -135,6 +143,7 @@ def test_unsafe_dictionary_default_handling():
             "f12": None,
             "f14": None,
             "f3": None,
+            "f6": None,
             "f62": None,
             "f66": None,
             "f72": None,
@@ -145,6 +154,7 @@ def test_unsafe_dictionary_default_handling():
             "f12": "BK0437",
             "f14": "半导体",
             "f3": "-",
+            "f6": "NaN",
             "f62": "NaN",
             "f66": "123.45",
             "f72": None,
@@ -160,6 +170,7 @@ def test_unsafe_dictionary_default_handling():
     assert item1["code"] == ""
     assert item1["name"] == ""
     assert item1["change_pct"] == 0.0
+    assert item1["turnover"] == 0.0
     assert item1["main_net_inflow"] == 0.0
     assert item1["super_large_inflow"] == 0.0
     assert item1["large_inflow"] == 0.0
@@ -170,6 +181,7 @@ def test_unsafe_dictionary_default_handling():
     assert item2["code"] == "BK0437"
     assert item2["name"] == "半导体"
     assert item2["change_pct"] == 0.0
+    assert item2["turnover"] == 0.0
     assert item2["main_net_inflow"] == 0.0
     assert item2["super_large_inflow"] == 0.0
     assert item2["large_inflow"] == 0.0

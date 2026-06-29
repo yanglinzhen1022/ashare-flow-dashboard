@@ -38,11 +38,39 @@
           <div class="grid grid-cols-2 gap-4 flex-1 overflow-hidden">
             <div class="flex flex-col">
               <div class="text-stockRed font-bold text-center border-b border-gray-800 pb-1 mb-2">流入榜</div>
-              <div class="flex-1 overflow-y-auto space-y-2" id="inflow-ranking"></div>
+              <TransitionGroup
+                tag="div"
+                name="list"
+                class="flex-1 overflow-y-auto space-y-2 relative"
+              >
+                <div
+                  v-for="(item, idx) in inflowRanking"
+                  :key="item.code"
+                  class="flex justify-between items-center bg-gray-900/40 p-2 rounded border-l-4 border-stockRed font-mono text-sm transition-all duration-500"
+                >
+                  <span class="text-gray-400 font-bold w-4">{{ idx + 1 }}</span>
+                  <span class="text-gray-200 font-medium truncate w-16">{{ item.name }}</span>
+                  <span class="text-stockRed font-bold">+{{ item.main_net_inflow.toFixed(2) }}亿</span>
+                </div>
+              </TransitionGroup>
             </div>
             <div class="flex flex-col">
               <div class="text-stockGreen font-bold text-center border-b border-gray-800 pb-1 mb-2">流出榜</div>
-              <div class="flex-1 overflow-y-auto space-y-2" id="outflow-ranking"></div>
+              <TransitionGroup
+                tag="div"
+                name="list"
+                class="flex-1 overflow-y-auto space-y-2 relative"
+              >
+                <div
+                  v-for="(item, idx) in outflowRanking"
+                  :key="item.code"
+                  class="flex justify-between items-center bg-gray-900/40 p-2 rounded border-l-4 border-stockGreen font-mono text-sm transition-all duration-500"
+                >
+                  <span class="text-gray-400 font-bold w-4">{{ idx + 1 }}</span>
+                  <span class="text-gray-200 font-medium truncate w-16">{{ item.name }}</span>
+                  <span class="text-stockGreen font-bold">{{ item.main_net_inflow.toFixed(2) }}亿</span>
+                </div>
+              </TransitionGroup>
             </div>
           </div>
         </div>
@@ -63,6 +91,9 @@ const wsStatus = ref('connecting') // connecting, connected, disconnected
 const currentTime = ref('')
 const socket = ref(null)
 const engine = ref(null)
+const inflowRanking = ref([])
+const outflowRanking = ref([])
+const lastReceivedDate = ref('')
 
 const wsStatusText = computed(() => {
   if (wsStatus.value === 'connecting') return '连接中 🟡'
@@ -107,12 +138,26 @@ const connectWS = () => {
     try {
       const payload = JSON.parse(event.data)
       if (payload.type === 'flow_update' && engine.value && !isUnmounted) {
+        if (payload.date && payload.date !== lastReceivedDate.value) {
+          engine.value.historyData = {}
+          lastReceivedDate.value = payload.date
+        }
+
         const allSectors = [...payload.data.industry, ...payload.data.concept]
         
         // 1. 渲染热力图
         engine.value.renderTreeMap(allSectors)
-        // 2. 渲染排行榜
-        engine.value.renderRankList(allSectors)
+        
+        // 2. 更新排行榜
+        inflowRanking.value = allSectors
+          .filter(s => s.main_net_inflow > 0)
+          .sort((a, b) => b.main_net_inflow - a.main_net_inflow)
+          .slice(0, 10)
+        
+        outflowRanking.value = allSectors
+          .filter(s => s.main_net_inflow < 0)
+          .sort((a, b) => a.main_net_inflow - b.main_net_inflow)
+          .slice(0, 10)
         
         // 3. 更新折线走势图的缓存记录
         const currentMin = payload.data.timestamp.substring(0, 5) // "HH:MM"
@@ -195,3 +240,18 @@ onUnmounted(() => {
   }
 })
 </script>
+
+<style scoped>
+.list-move {
+  transition: transform 0.5s ease;
+}
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s ease;
+}
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+</style>

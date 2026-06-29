@@ -29,7 +29,7 @@ class DataFetcher:
             "pn": "1", "pz": "50", "po": "1", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:2", # 行业板块代码
-            "fields": "f12,f14,f3,f62,f66,f72,f78,f84"
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
         
         # 2. 概念板块 f62: 主力净流入
@@ -37,7 +37,7 @@ class DataFetcher:
             "pn": "1", "pz": "50", "po": "1", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:3", # 概念板块代码
-            "fields": "f12,f14,f3,f62,f66,f72,f78,f84"
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
         
         formatted_industry = []
@@ -64,6 +64,7 @@ class DataFetcher:
             return self.latest_data
             
         now_cst = datetime.now(cst_tz)
+        current_date = now_cst.strftime("%Y-%m-%d")
         self.latest_data = {
             "timestamp": now_cst.strftime("%H:%M:%S"),
             "industry": formatted_industry,
@@ -78,6 +79,7 @@ class DataFetcher:
         payload = {
             "type": "flow_update",
             "timestamp": self.latest_data["timestamp"],
+            "date": current_date,
             "data": self.latest_data
         }
         await self.manager.broadcast(payload)
@@ -98,10 +100,12 @@ class DataFetcher:
         result = []
         to_yicang = 100000000.0
         for item in items:
+            turnover = round(self._safe_float(item.get("f6")) / to_yicang, 2)
             result.append({
                 "code": item.get("f12") or "",
                 "name": item.get("f14") or "",
                 "change_pct": self._safe_float(item.get("f3")),
+                "turnover": turnover,
                 "main_net_inflow": round(self._safe_float(item.get("f62")) / to_yicang, 2),
                 "super_large_inflow": round(self._safe_float(item.get("f66")) / to_yicang, 2),
                 "large_inflow": round(self._safe_float(item.get("f72")) / to_yicang, 2),

@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 from fastapi import WebSocket
 
@@ -19,3 +20,17 @@ class ConnectionManager:
                 await connection.send_json(message)
             except Exception:
                 self.disconnect(connection)
+
+    async def start_ping_loop(self):
+        while True:
+            try:
+                await asyncio.sleep(10)
+                for connection in list(self.active_connections):
+                    try:
+                        await connection.send_json({"type": "ping"})
+                    except Exception:
+                        self.disconnect(connection)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass

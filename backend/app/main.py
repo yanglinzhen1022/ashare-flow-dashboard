@@ -11,13 +11,15 @@ fetcher = DataFetcher(manager)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: 启动后台数据拉取轮询协程
+    # Startup: 启动后台数据拉取轮询协程与心跳循环
     task = asyncio.create_task(fetcher.start_loop())
+    ping_task = asyncio.create_task(manager.start_ping_loop())
     yield
     # Shutdown: 优雅关闭 HTTP 客户端并取消后台任务
     task.cancel()
+    ping_task.cancel()
     try:
-        await task
+        await asyncio.gather(task, ping_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
     await fetcher.shutdown()
