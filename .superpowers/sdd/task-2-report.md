@@ -106,3 +106,37 @@ python3 -m pytest
 ============================== 7 passed in 0.27s ===============================
 ```
 
+## Task 2 Re-Review Fix Report (Part 4) (2026-06-29)
+
+### What was fixed
+1. **Timezone Dependency (UTC+8 pinning) (`backend/app/scheduler.py`):**
+   - Replaced host-dependent `time.localtime()` with `datetime` with a fixed timezone offset of UTC+8 (China Standard Time) for all date/time formatting.
+   - Pinned timezone for `self.last_date`, `current_date`, `current_time` (timestamp), and `current_min`.
+2. **Unsafe Non-Numeric Strings (`backend/app/scheduler.py`):**
+   - Implemented `_safe_float` in `DataFetcher` to safely parse floats and fallback to `0.0` on failure, including checking for `NaN` and `None`.
+   - Used `_safe_float` for parsing fields in `_format_items` to protect against non-numeric strings like `"-"` or `"NaN"`.
+3. **Resources Clean Up (`backend/app/scheduler.py`):**
+   - Added an `async def shutdown(self):` method to `DataFetcher` that calls `await self.client.aclose()` if `self.client` is not None.
+4. **Verification Tests (`backend/tests/test_scheduler.py`):**
+   - Expanded `test_unsafe_dictionary_default_handling` to verify handling of non-numeric strings like `"-"` and `"NaN"`.
+   - Added `test_shutdown_closes_client` and `test_shutdown_with_none_client` to verify correct shutdown behavior.
+
+### Test Command
+```bash
+PYTHONPATH=. ../.venv/bin/pytest
+```
+
+### Test Output
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.10.20, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/yanglinzhen.3/AI_Projects/stock/backend
+plugins: anyio-4.14.1, asyncio-1.4.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 9 items
+
+tests/test_manager.py ..                                                 [ 22%]
+tests/test_scheduler.py .......                                          [100%]
+
+============================== 9 passed in 0.26s ===============================
+```
