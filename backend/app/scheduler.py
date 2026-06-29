@@ -10,68 +10,73 @@ class DataFetcher:
         self.manager = manager
         self.latest_data: Dict = {"industry": [], "concept": []}
         self.history_cache: Dict[str, Dict] = {} # 存储今日开盘以来的每分钟历史走势
+        self.client = None
 
     async def fetch_and_broadcast(self) -> Dict:
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
-        async with httpx.AsyncClient() as client:
-            # 1. 行业板块 f62: 主力净流入
-            industry_params = {
-                "pn": "1", "pz": "50", "po": "1", "np": "1",
-                "fltt": "2", "invt": "2", "fid": "f62",
-                "fs": "m:90 t:2", # 行业板块代码
-                "fields": "f12,f14,f3,f62,f66,f72,f78,f84"
-            }
+        if self.client is None or self.client.is_closed:
+            self.client = httpx.AsyncClient()
+        
+        # 1. 行业板块 f62: 主力净流入
+        industry_params = {
+            "pn": "1", "pz": "50", "po": "1", "np": "1",
+            "fltt": "2", "invt": "2", "fid": "f62",
+            "fs": "m:90 t:2", # 行业板块代码
+            "fields": "f12,f14,f3,f62,f66,f72,f78,f84"
+        }
+        
+        # 2. 概念板块 f62: 主力净流入
+        concept_params = {
+            "pn": "1", "pz": "50", "po": "1", "np": "1",
+            "fltt": "2", "invt": "2", "fid": "f62",
+            "fs": "m:90 t:3", # 概念板块代码
+            "fields": "f12,f14,f3,f62,f66,f72,f78,f84"
+        }
+        
+        formatted_industry = []
+        formatted_concept = []
+        
+        try:
+            # 并发请求行业和概念数据
+            res_ind, res_con = await asyncio.gather(
+                self.client.get(Config.EASTMONEY_API_URL, params=industry_params, headers=headers, timeout=5),
+                self.client.get(Config.EASTMONEY_API_URL, params=concept_params, headers=headers, timeout=5)
+            )
             
-            # 2. 概念板块 f62: 主力净流入
-            concept_params = {
-                "pn": "1", "pz": "50", "po": "1", "np": "1",
-                "fltt": "2", "invt": "2", "fid": "f62",
-                "fs": "m:90 t:3", # 概念板块代码
-                "fields": "f12,f14,f3,f62,f66,f72,f78,f84"
-            }
+            res_ind.raise_for_status()
+            res_con.raise_for_status()
             
-            formatted_industry = []
-            formatted_concept = []
+            diff_ind = res_ind.json().get("data", {}).get("diff", [])
+            formatted_industry = self._format_items(diff_ind)
             
-            try:
-                # 并发请求行业和概念数据
-                res_ind, res_con = await asyncio.gather(
-                    client.get(Config.EASTMONEY_API_URL, params=industry_params, headers=headers, timeout=5),
-                    client.get(Config.EASTMONEY_API_URL, params=concept_params, headers=headers, timeout=5)
-                )
+            diff_con = res_con.json().get("data", {}).get("diff", [])
+            formatted_concept = self._format_items(diff_con)
                 
-                if res_ind.status_code == 200:
-                    diff = res_ind.json().get("data", {}).get("diff", [])
-                    formatted_industry = self._format_items(diff)
-                    
-                if res_con.status_code == 200:
-                    diff = res_con.json().get("data", {}).get("diff", [])
-                    formatted_concept = self._format_items(diff)
-                    
-            except Exception as e:
-                print(f"数据抓取失败: {e}")
-                
-            self.latest_data = {
-                "timestamp": time.strftime("%H:%M:%S", time.localtime()),
-                "industry": formatted_industry,
-                "concept": formatted_concept
-            }
-            
-            # 更新历史折线图缓存 (根据当前分钟记录主力资金累计额)
-            current_min = time.strftime("%H:%M", time.localtime())
-            self._update_history_cache(current_min, formatted_industry + formatted_concept)
-            
-            # 广播给全部连接客户端
-            payload = {
-                "type": "flow_update",
-                "timestamp": self.latest_data["timestamp"],
-                "data": self.latest_data
-            }
-            await self.manager.broadcast(payload)
+        except Exception as e:
+            print(f"数据抓取失败: {e}")
             return self.latest_data
+            
+        self.latest_data = {
+            "timestamp": time.strftime("%H:%M:%S", time.localtime()),
+            "industry": formatted_industry,
+            "concept": formatted_concept
+        }
+        
+        # 更新历史折线图缓存 (根据当前分钟记录主力资金累计额)
+        current_min = time.strftime("%H:%M", time.localtime())
+        self._update_history_cache(current_min, formatted_industry + formatted_concept)
+        
+        # 广播给全部连接客户端
+        payload = {
+            "type": "flow_update",
+            "timestamp": self.latest_data["timestamp"],
+            "data": self.latest_data
+        }
+        await self.manager.broadcast(payload)
+        return self.latest_data
 
     def _format_items(self, items: List[Dict]) -> List[Dict]:
         result = []

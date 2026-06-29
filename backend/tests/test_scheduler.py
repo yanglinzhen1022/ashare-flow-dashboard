@@ -1,7 +1,8 @@
 import pytest
 from app.scheduler import DataFetcher
 from app.manager import ConnectionManager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
+import httpx
 
 @pytest.mark.asyncio
 async def test_data_fetch_and_formatting():
@@ -27,8 +28,11 @@ async def test_data_fetch_and_formatting():
     }
     
     with patch("httpx.AsyncClient.get") as mock_get:
-        mock_get.return_value.json = lambda: mock_raw_response
-        mock_get.return_value.status_code = 200
+        mock_response = MagicMock()
+        mock_response.json = lambda: mock_raw_response
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
         
         # 执行单次数据抓取与转换
         data = await fetcher.fetch_and_broadcast()
@@ -46,3 +50,59 @@ async def test_data_fetch_and_formatting():
         
         # 验证广播被触发
         mock_manager.broadcast.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_data_fetch_client_reuse():
+    mock_manager = AsyncMock(spec=ConnectionManager)
+    fetcher = DataFetcher(mock_manager)
+    
+    mock_raw_response = {"data": {"diff": []}}
+    
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_response = MagicMock()
+        mock_response.json = lambda: mock_raw_response
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+        
+        # 第一次抓取
+        assert fetcher.client is None
+        await fetcher.fetch_and_broadcast()
+        client1 = fetcher.client
+        assert client1 is not None
+        
+        # 第二次抓取
+        await fetcher.fetch_and_broadcast()
+        client2 = fetcher.client
+        assert client2 is client1  # 验证 client instance 被复用
+
+@pytest.mark.asyncio
+async def test_data_fetch_failure_no_broadcast():
+    mock_manager = AsyncMock(spec=ConnectionManager)
+    fetcher = DataFetcher(mock_manager)
+    
+    # 模拟已有历史数据
+    fetcher.latest_data = {
+        "timestamp": "12:00:00",
+        "industry": [{"code": "BK0437", "name": "半导体"}],
+        "concept": []
+    }
+    
+    with patch("httpx.AsyncClient.get") as mock_get:
+        # 模拟请求异常
+        mock_get.side_effect = httpx.RequestError("Connection timeout")
+        
+        # 触发抓取
+        data = await fetcher.fetch_and_broadcast()
+        
+        # 验证返回的是旧的 latest_data，没有被清空/覆盖
+        assert data == {
+            "timestamp": "12:00:00",
+            "industry": [{"code": "BK0437", "name": "半导体"}],
+            "concept": []
+        }
+        assert fetcher.latest_data == data
+        
+        # 验证没有调用 broadcast
+        mock_manager.broadcast.assert_not_called()
+
