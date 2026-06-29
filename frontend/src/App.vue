@@ -82,6 +82,9 @@ const updateTime = () => {
 
 // 建立 WebSocket 连接及心跳
 let pingInterval = null
+let reconnectTimeout = null
+let isUnmounted = false
+
 const connectWS = () => {
   wsStatus.value = 'connecting'
   const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://'
@@ -114,18 +117,34 @@ const connectWS = () => {
     wsStatus.value = 'disconnected'
     clearInterval(pingInterval)
     // 3秒后指数退避重连
-    setTimeout(connectWS, 3000)
+    if (!isUnmounted) {
+      reconnectTimeout = setTimeout(connectWS, 3000)
+    }
   }
 }
+
+let clockInterval = null
 
 onMounted(() => {
   connectWS()
   updateTime()
-  setInterval(updateTime, 1000)
+  clockInterval = setInterval(updateTime, 1000)
 })
 
 onUnmounted(() => {
-  if (socket.value) socket.value.close()
-  clearInterval(pingInterval)
+  isUnmounted = true
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout)
+  }
+  if (clockInterval) {
+    clearInterval(clockInterval)
+  }
+  if (pingInterval) {
+    clearInterval(pingInterval)
+  }
+  if (socket.value) {
+    socket.value.onclose = null
+    socket.value.close()
+  }
 })
 </script>
