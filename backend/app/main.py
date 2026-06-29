@@ -15,12 +15,12 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(fetcher.start_loop())
     yield
     # Shutdown: 优雅关闭 HTTP 客户端并取消后台任务
-    await fetcher.shutdown()
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    await fetcher.shutdown()
 
 app = FastAPI(title="A-Share Capital Flow Dashboard Backend", lifespan=lifespan)
 
