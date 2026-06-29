@@ -6,6 +6,8 @@ from typing import Dict, List
 from app.config import Config
 from app.manager import ConnectionManager
 
+import socket
+
 cst_tz = timezone(timedelta(hours=8))
 
 class DataFetcher:
@@ -15,12 +17,21 @@ class DataFetcher:
         self.history_cache: Dict[str, Dict] = {} # 存储今日开盘以来的每分钟历史走势
         self.last_date = datetime.now(cst_tz).strftime("%Y-%m-%d")
         self.client = None
+        
+        # 强制解析 push2.eastmoney.com 到 IPv4 地址，规避其 IPv6 CDN 经常性空回复 (Empty reply) 的问题
+        self.api_url = Config.EASTMONEY_API_URL
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Host": "push2.eastmoney.com"
+        }
+        try:
+            ipv4_addr = socket.gethostbyname("push2.eastmoney.com")
+            if ipv4_addr:
+                self.api_url = f"http://{ipv4_addr}/api/qt/clist/get"
+        except Exception as e:
+            print(f"DNS 强制 IPv4 解析失败，回退至默认解析: {e}")
 
     async def fetch_and_broadcast(self) -> Dict:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
         if self.client is None or self.client.is_closed:
             self.client = httpx.AsyncClient()
         
@@ -46,8 +57,8 @@ class DataFetcher:
         try:
             # 并发请求行业和概念数据
             res_ind, res_con = await asyncio.gather(
-                self.client.get(Config.EASTMONEY_API_URL, params=industry_params, headers=headers, timeout=5),
-                self.client.get(Config.EASTMONEY_API_URL, params=concept_params, headers=headers, timeout=5)
+                self.client.get(self.api_url, params=industry_params, headers=self.headers, timeout=5),
+                self.client.get(self.api_url, params=concept_params, headers=self.headers, timeout=5)
             )
             
             res_ind.raise_for_status()
