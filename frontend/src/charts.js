@@ -60,8 +60,8 @@ export class ChartEngine {
           return `
             <div class="p-2 font-mono text-sm text-white">
               <b class="text-base">${d.name}</b> (${d.code})<br/>
-              今日涨跌幅: <span class="${d.change_pct >= 0 ? 'text-red-500' : 'text-green-500'}">${d.change_pct}%</span><br/>
-              主力净流入: <span class="${d.main_net_inflow >= 0 ? 'text-red-500' : 'text-green-500'}">${d.main_net_inflow} 亿</span><br/>
+              今日涨跌幅: <span style="color: ${d.change_pct >= 0 ? '#FF4D4F' : '#22C55E'};">${d.change_pct}%</span><br/>
+              主力净流入: <span style="color: ${d.main_net_inflow >= 0 ? '#FF4D4F' : '#22C55E'};">${d.main_net_inflow} 亿</span><br/>
               <hr class="border-gray-800 my-1"/>
               超大单: ${d.super_large_inflow} 亿<br/>
               大单: ${d.large_inflow} 亿<br/>
@@ -69,6 +69,15 @@ export class ChartEngine {
               小单: ${d.small_inflow} 亿
             </div>
           `
+        }
+      },
+      visualMap: {
+        show: false,
+        min: -10,
+        max: 10,
+        dimension: 'flow',
+        inRange: {
+          color: ['#22C55E', '#1F2937', '#FF4D4F']
         }
       },
       series: [{
@@ -88,14 +97,7 @@ export class ChartEngine {
             borderColor: '#121827',
             gapWidth: 1
           }
-        }],
-        // 颜色渐变判定：红涨绿跌
-        visualMin: -10,
-        visualMax: 10,
-        visualDimension: 'flow',
-        inRange: {
-          color: ['#22C55E', '#1F2937', '#FF4D4F'] // 绿色 -> 中间暗色 -> 红色
-        }
+        }]
       }]
     }
 
@@ -117,6 +119,12 @@ export class ChartEngine {
     const history = this.historyData[this.selectedSectorCode]
     if (!history) return
 
+    const lastVal = history.values[history.values.length - 1] || 0.0
+    const isPositive = lastVal >= 0
+    const lineColor = isPositive ? '#FF4D4F' : '#22C55E'
+    const areaColorStart = isPositive ? 'rgba(255, 77, 79, 0.4)' : 'rgba(34, 197, 94, 0.4)'
+    const areaColorEnd = isPositive ? 'rgba(255, 77, 79, 0.0)' : 'rgba(34, 197, 94, 0.0)'
+
     const option = {
       backgroundColor: 'transparent',
       grid: { top: 20, bottom: 20, left: 40, right: 20 },
@@ -136,11 +144,11 @@ export class ChartEngine {
         data: history.values,
         smooth: true,
         showSymbol: false,
-        lineStyle: { color: '#FF4D4F', width: 2 },
+        lineStyle: { color: lineColor, width: 2 },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(255, 77, 79, 0.4)' },
-            { offset: 1, color: 'rgba(255, 77, 79, 0.0)' }
+            { offset: 0, color: areaColorStart },
+            { offset: 1, color: areaColorEnd }
           ])
         }
       }]
@@ -162,10 +170,10 @@ export class ChartEngine {
         avoidLabelOverlap: false,
         label: { show: false },
         data: [
-          { value: Math.abs(d.super_large_inflow), name: `超大单 (${d.super_large_inflow}亿)`, itemStyle: { color: d.super_large_inflow >= 0 ? '#EF4444' : '#10B981' } },
-          { value: Math.abs(d.large_inflow), name: `大单 (${d.large_inflow}亿)`, itemStyle: { color: d.large_inflow >= 0 ? '#F87171' : '#34D399' } },
-          { value: Math.abs(d.medium_inflow), name: `中单 (${d.medium_inflow}亿)`, itemStyle: { color: d.medium_inflow >= 0 ? '#FCD34D' : '#60A5FA' } },
-          { value: Math.abs(d.small_inflow), name: `小单 (${d.small_inflow}亿)`, itemStyle: { color: d.small_inflow >= 0 ? '#F3F4F6' : '#9CA3AF' } }
+          { value: Math.abs(d.super_large_inflow), name: `超大单 (${d.super_large_inflow}亿)`, itemStyle: { color: d.super_large_inflow >= 0 ? '#FF4D4F' : '#22C55E' } },
+          { value: Math.abs(d.large_inflow), name: `大单 (${d.large_inflow}亿)`, itemStyle: { color: d.large_inflow >= 0 ? '#FF7875' : '#52C41A' } },
+          { value: Math.abs(d.medium_inflow), name: `中单 (${d.medium_inflow}亿)`, itemStyle: { color: d.medium_inflow >= 0 ? '#FFA39E' : '#73D13D' } },
+          { value: Math.abs(d.small_inflow), name: `小单 (${d.small_inflow}亿)`, itemStyle: { color: d.small_inflow >= 0 ? '#FFCCC7' : '#B7EB8F' } }
         ]
       }]
     }
@@ -173,19 +181,15 @@ export class ChartEngine {
   }
 
   renderRankList(allSectors) {
-    // 按照资金流向由大到小排序
-    const sorted = [...allSectors].sort((a, b) => b.main_net_inflow - a.main_net_inflow)
-    
     const inflowDom = document.getElementById('inflow-ranking')
     const outflowDom = document.getElementById('outflow-ranking')
     if (!inflowDom || !outflowDom) return
 
-    // 提取 Top 10 流入与 Top 10 流出
-    const inflowTop = sorted.slice(0, 10)
-    const outflowTop = sorted.slice(-10).reverse()
+    const inflows = allSectors.filter(s => s.main_net_inflow > 0).sort((a, b) => b.main_net_inflow - a.main_net_inflow).slice(0, 10)
+    const outflows = allSectors.filter(s => s.main_net_inflow < 0).sort((a, b) => a.main_net_inflow - b.main_net_inflow).slice(0, 10)
 
     // 绘制流入榜
-    inflowDom.innerHTML = inflowTop.map((item, idx) => `
+    inflowDom.innerHTML = inflows.map((item, idx) => `
       <div class="flex justify-between items-center bg-gray-900/40 p-2 rounded border-l-4 border-stockRed font-mono text-sm">
         <span class="text-gray-400 font-bold w-4">${idx + 1}</span>
         <span class="text-gray-200 font-medium truncate w-16">${item.name}</span>
@@ -194,7 +198,7 @@ export class ChartEngine {
     `).join('')
 
     // 绘制流出榜
-    outflowDom.innerHTML = outflowTop.map((item, idx) => `
+    outflowDom.innerHTML = outflows.map((item, idx) => `
       <div class="flex justify-between items-center bg-gray-900/40 p-2 rounded border-l-4 border-stockGreen font-mono text-sm">
         <span class="text-gray-400 font-bold w-4">${idx + 1}</span>
         <span class="text-gray-200 font-medium truncate w-16">${item.name}</span>
