@@ -140,3 +140,31 @@ tests/test_scheduler.py .......                                          [100%]
 
 ============================== 9 passed in 0.26s ===============================
 ```
+
+## Task 2 Mock Date Fix Report (2026-06-29)
+
+### What was fixed
+1. **Datetime Mocking Fix (`backend/tests/test_scheduler.py`):**
+   - Corrected the mock patching in `test_history_cache_cleared_on_new_day`.
+   - Instead of patching `time.strftime` (which was ineffective because `backend/app/scheduler.py` uses `datetime.now(cst_tz).strftime`), patched `app.scheduler.datetime` and set its return values to mock `datetime.now(cst_tz).strftime("%Y-%m-%d")` returning `"2026-06-29"`.
+   - This ensures the test success is independent of the actual current date on the host machine.
+
+### Test Command
+```bash
+PYTHONPATH=. pytest
+```
+
+### Test Output
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.10.20, pytest-9.1.0, pluggy-1.6.0
+rootdir: /Users/yanglinzhen.3/AI_Projects/stock/backend
+plugins: asyncio-1.4.0, anyio-4.13.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 9 items
+
+tests/test_manager.py ..                                                 [ 22%]
+tests/test_scheduler.py .......                                          [100%]
+
+============================== 9 passed in 0.29s ===============================
+```
