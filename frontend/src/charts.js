@@ -45,7 +45,7 @@ export class ChartEngine {
     // TreeMap 数据节点构造
     const data = allSectors.map(s => ({
       name: `${s.name}\n${s.main_net_inflow > 0 ? '+' : ''}${s.main_net_inflow}亿\n${s.change_pct}%`,
-      value: Math.abs(s.main_net_inflow), // 面积由流入或流出量绝对值代表大小
+      value: [Math.abs(s.main_net_inflow), s.main_net_inflow], // 面积由流入或流出量绝对值代表大小 (index 0)，颜色映射由实际流入量决定 (index 1)
       code: s.code,
       flow: s.main_net_inflow,
       details: s
@@ -55,7 +55,7 @@ export class ChartEngine {
       backgroundColor: 'transparent',
       tooltip: {
         formatter: (info) => {
-          const d = info.data.details
+          const d = info.data?.details
           if (!d) return ''
           return `
             <div class="p-2 font-mono text-sm text-white">
@@ -75,7 +75,7 @@ export class ChartEngine {
         show: false,
         min: -10,
         max: 10,
-        dimension: 'flow',
+        dimension: 1,
         inRange: {
           color: ['#22C55E', '#1F2937', '#FF4D4F']
         }
