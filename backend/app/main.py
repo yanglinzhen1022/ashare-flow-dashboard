@@ -55,3 +55,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+# 挂载前端静态文件（生产/单进程部署环境）
+import os
+from fastapi.staticfiles import StaticFiles
+
+# 确定 frontend/dist 路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+dist_path = os.path.abspath(os.path.join(current_dir, "..", "..", "frontend", "dist"))
+
+if os.path.exists(dist_path):
+    app.mount("/", StaticFiles(directory=dist_path, html=True), name="static")
+
