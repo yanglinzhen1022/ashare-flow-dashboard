@@ -10,6 +10,7 @@ class DataFetcher:
         self.manager = manager
         self.latest_data: Dict = {"industry": [], "concept": []}
         self.history_cache: Dict[str, Dict] = {} # 存储今日开盘以来的每分钟历史走势
+        self.last_date = time.strftime("%Y-%m-%d", time.localtime())
         self.client = None
 
     async def fetch_and_broadcast(self) -> Dict:
@@ -83,18 +84,23 @@ class DataFetcher:
         to_yicang = 100000000.0
         for item in items:
             result.append({
-                "code": item.get("f12", ""),
-                "name": item.get("f14", ""),
-                "change_pct": item.get("f3", 0.0),
-                "main_net_inflow": round(item.get("f62", 0.0) / to_yicang, 2),
-                "super_large_inflow": round(item.get("f66", 0.0) / to_yicang, 2),
-                "large_inflow": round(item.get("f72", 0.0) / to_yicang, 2),
-                "medium_inflow": round(item.get("f78", 0.0) / to_yicang, 2),
-                "small_inflow": round(item.get("f84", 0.0) / to_yicang, 2),
+                "code": item.get("f12") or "",
+                "name": item.get("f14") or "",
+                "change_pct": item.get("f3") or 0.0,
+                "main_net_inflow": round((item.get("f62") or 0.0) / to_yicang, 2),
+                "super_large_inflow": round((item.get("f66") or 0.0) / to_yicang, 2),
+                "large_inflow": round((item.get("f72") or 0.0) / to_yicang, 2),
+                "medium_inflow": round((item.get("f78") or 0.0) / to_yicang, 2),
+                "small_inflow": round((item.get("f84") or 0.0) / to_yicang, 2),
             })
         return result
 
     def _update_history_cache(self, current_min: str, all_sectors: List[Dict]):
+        current_date = time.strftime("%Y-%m-%d", time.localtime())
+        if current_date != self.last_date:
+            self.history_cache.clear()
+            self.last_date = current_date
+
         for sector in all_sectors:
             code = sector["code"]
             if code not in self.history_cache:

@@ -106,3 +106,51 @@ async def test_data_fetch_failure_no_broadcast():
         # 验证没有调用 broadcast
         mock_manager.broadcast.assert_not_called()
 
+@pytest.mark.asyncio
+async def test_history_cache_cleared_on_new_day():
+    mock_manager = AsyncMock(spec=ConnectionManager)
+    fetcher = DataFetcher(mock_manager)
+    fetcher.history_cache = {
+        "BK0437": {"timestamps": ["09:30"], "values": [1.2]}
+    }
+    fetcher.last_date = "2026-06-28"
+    
+    with patch("time.strftime") as mock_strftime:
+        mock_strftime.return_value = "2026-06-29"
+        
+        fetcher._update_history_cache("09:31", [{"code": "BK0437", "main_net_inflow": 2.5}])
+        
+        assert "BK0437" in fetcher.history_cache
+        assert fetcher.history_cache["BK0437"]["timestamps"] == ["09:31"]
+        assert fetcher.history_cache["BK0437"]["values"] == [2.5]
+        assert fetcher.last_date == "2026-06-29"
+
+def test_unsafe_dictionary_default_handling():
+    mock_manager = AsyncMock(spec=ConnectionManager)
+    fetcher = DataFetcher(mock_manager)
+    
+    bad_items = [
+        {
+            "f12": None,
+            "f14": None,
+            "f3": None,
+            "f62": None,
+            "f66": None,
+            "f72": None,
+            "f78": None,
+            "f84": None
+        }
+    ]
+    
+    formatted = fetcher._format_items(bad_items)
+    assert len(formatted) == 1
+    item = formatted[0]
+    assert item["code"] == ""
+    assert item["name"] == ""
+    assert item["change_pct"] == 0.0
+    assert item["main_net_inflow"] == 0.0
+    assert item["super_large_inflow"] == 0.0
+    assert item["large_inflow"] == 0.0
+    assert item["medium_inflow"] == 0.0
+    assert item["small_inflow"] == 0.0
+
