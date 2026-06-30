@@ -50,23 +50,13 @@ class UrllibAsyncTransport(httpx.AsyncHTTPTransport):
                     time.sleep(0.1 * (attempt + 1))
             raise last_err
                 
-        try:
-            status_code, resp_headers, content = await asyncio.to_thread(sync_req)
-            return httpx.Response(
-                status_code=status_code,
-                headers=resp_headers,
-                content=content,
-                request=request
-            )
-        except Exception as e:
-            # 优雅故障降级，确保 3 次重试失败后也只返回空列表 JSON，绝不抛异常导致整个后台长连接抓取任务崩溃中断
-            print(f"[UrllibAsyncTransport] HTTP 请求重试失败且已降级: {e}")
-            return httpx.Response(
-                status_code=200,
-                headers={"content-type": "application/json"},
-                content=b'{"rc":0,"data":{"diff":[]}}',
-                request=request
-            )
+        status_code, resp_headers, content = await asyncio.to_thread(sync_req)
+        return httpx.Response(
+            status_code=status_code,
+            headers=resp_headers,
+            content=content,
+            request=request
+        )
 
 cst_tz = timezone(timedelta(hours=8))
 
@@ -123,23 +113,30 @@ class DataFetcher:
         formatted_concept = []
         
         try:
-            # 使用 HTTP 客户端并发请求数据
-            res_ind_in, res_ind_out, res_con_in, res_con_out = await asyncio.gather(
-                self.client.get(self.api_url, params=industry_in_params, headers=self.headers, timeout=5),
-                self.client.get(self.api_url, params=industry_out_params, headers=self.headers, timeout=5),
-                self.client.get(self.api_url, params=concept_in_params, headers=self.headers, timeout=5),
-                self.client.get(self.api_url, params=concept_out_params, headers=self.headers, timeout=5)
-            )
+            # 顺序串行执行 4 路请求以规避 WAF 并发连接限制，同时带有 50ms 间隙防抖
+            res_ind_in = await self.client.get(self.api_url, params=industry_in_params, headers=self.headers, timeout=5)
+            await asyncio.sleep(0.05)
+            res_ind_out = await self.client.get(self.api_url, params=industry_out_params, headers=self.headers, timeout=5)
+            await asyncio.sleep(0.05)
+            res_con_in = await self.client.get(self.api_url, params=concept_in_params, headers=self.headers, timeout=5)
+            await asyncio.sleep(0.05)
+            res_con_out = await self.client.get(self.api_url, params=concept_out_params, headers=self.headers, timeout=5)
             
             res_ind_in.raise_for_status()
             res_ind_out.raise_for_status()
             res_con_in.raise_for_status()
             res_con_out.raise_for_status()
             
-            # 合并并去重行业板块
-            diff_ind_in = res_ind_in.json().get("data", {}).get("diff", []) or []
-            diff_ind_out = res_ind_out.json().get("data", {}).get("diff", []) or []
+            # 提取数据
+            diff_ind_in = res_ind_in.json().get("data", {}).get("diff", [])
+            diff_ind_out = res_ind_out.json().get("data", {}).get("diff", [])
+            diff_con_in = res_con_in.json().get("data", {}).get("diff", [])
+            diff_con_out = res_con_out.json().get("data", {}).get("diff", [])
             
+            # 强校验：如果任一板块列表获取为空，视作网络或接口异常，直接抛错进行完整状态保护（拒绝局部覆盖）
+            if not diff_ind_in or not diff_ind_out or not diff_con_in or not diff_con_out:
+                raise ValueError("从东财 API 接收到了不完整的局部数据集")
+                
             combined_ind_dict = {}
             for item in diff_ind_in + diff_ind_out:
                 code = item.get("f12")
@@ -147,10 +144,6 @@ class DataFetcher:
                     combined_ind_dict[code] = item
             
             formatted_industry = self._format_items(list(combined_ind_dict.values()))
-            
-            # 合并并去重概念板块
-            diff_con_in = res_con_in.json().get("data", {}).get("diff", []) or []
-            diff_con_out = res_con_out.json().get("data", {}).get("diff", []) or []
             
             combined_con_dict = {}
             for item in diff_con_in + diff_con_out:
@@ -161,7 +154,7 @@ class DataFetcher:
             formatted_concept = self._format_items(list(combined_con_dict.values()))
                 
         except Exception as e:
-            print(f"板块数据处理合并异常: {e}")
+            print(f"数据抓取失败: {e}")
             return self.latest_data
             
         # 仅在抓取到有效数据记录时更新内存最新缓存并进行广播，防止在网络短暂闪断时用空列表覆盖已有的有效看盘数据
