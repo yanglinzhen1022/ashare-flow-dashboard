@@ -51,6 +51,20 @@ def test_get_sector_history_endpoint():
         assert kwargs["params"]["klt"] == "101"
         assert kwargs["params"]["lmt"] == "30"
 
+def test_get_sector_history_endpoint_today():
+    fetcher.history_cache = {
+        "BK0437": {
+            "timestamps": ["09:30", "09:31"],
+            "values": [1.0, 2.5]
+        }
+    }
+    response = client.get("/api/sectors/history/BK0437?period=1")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["code"] == 200
+    assert data["data"]["timestamps"] == ["09:30", "09:31"]
+    assert data["data"]["values"] == [1.0, 2.5]
+
 def test_get_sector_stocks_endpoint():
     mock_client = AsyncMock()
     mock_response = MagicMock()

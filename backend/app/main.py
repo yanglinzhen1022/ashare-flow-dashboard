@@ -45,13 +45,18 @@ async def get_sectors_history():
 import httpx
 @app.get("/api/sectors/history/{code}")
 async def get_sector_history(code: str, period: str = "1"):
+    if period != "daily":
+        data = fetcher.history_cache.get(code, {"timestamps": [], "values": []})
+        return {
+            "code": 200,
+            "data": data
+        }
     try:
-        # Default intraday is klt=1. Daily K-line is klt=101
-        klt_val = "101" if period == "daily" else "1"
+        # Daily K-line is klt=101
         url = fetcher.api_url.replace("/api/qt/clist/get", "/api/qt/stock/fflow/kline/get")
         params = {
             "secid": f"90.{code}",
-            "klt": klt_val,
+            "klt": "101",
             "lmt": "30",
             "fields1": "f1,f2,f3,f7",
             "fields2": "f51,f52"
