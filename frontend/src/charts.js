@@ -89,7 +89,7 @@ export class ChartEngine {
       series: [{
         type: 'treemap',
         data: data,
-        roam: false,
+        roam: true,
         nodeClick: 'select',
         breadcrumb: { show: false },
         visualMin: -15,
@@ -112,6 +112,15 @@ export class ChartEngine {
     }
 
     this.treemapChart.setOption(option)
+
+    // 绑定双击重置
+    this.treemapChart.off('dblclick')
+    this.treemapChart.on('dblclick', () => {
+      this.treemapChart.dispatchAction({
+        type: 'treemapZoomToNode',
+        targetNodeId: ''
+      })
+    })
 
     // 绑定点击事件，展示对应板块的资金结构和走势
     this.treemapChart.off('click')
