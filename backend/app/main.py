@@ -44,34 +44,36 @@ async def get_sectors_history():
 
 import httpx
 @app.get("/api/sectors/history/{code}")
-async def get_sector_history(code: str):
+async def get_sector_history(code: str, period: str = "1"):
     try:
+        # Default intraday is klt=1. Daily K-line is klt=101
+        klt_val = "101" if period == "daily" else "1"
         url = fetcher.api_url.replace("/api/qt/clist/get", "/api/qt/stock/fflow/kline/get")
         params = {
             "secid": f"90.{code}",
-            "klt": "1",
-            "lmt": "0",
+            "klt": klt_val,
+            "lmt": "30",
             "fields1": "f1,f2,f3,f7",
             "fields2": "f51,f52"
         }
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, headers=fetcher.headers, timeout=5)
-            r.raise_for_status()
-            data = r.json().get("data")
-            if not data:
-                return {"code": 200, "data": {"timestamps": [], "values": []}}
-            klines = data.get("klines", [])
-            timestamps = []
-            values = []
-            to_yicang = 100000000.0
-            for k in klines:
-                parts = k.split(",")
-                if len(parts) >= 2:
-                    t_str = parts[0].split(" ")[-1]
-                    val = round(float(parts[1]) / to_yicang, 2)
-                    timestamps.append(t_str)
-                    values.append(val)
-            return {"code": 200, "data": {"timestamps": timestamps, "values": values}}
+        client = fetcher.get_client()
+        r = await client.get(url, params=params, headers=fetcher.headers, timeout=5)
+        r.raise_for_status()
+        data = r.json().get("data")
+        if not data:
+            return {"code": 200, "data": {"timestamps": [], "values": []}}
+        klines = data.get("klines", [])
+        timestamps = []
+        values = []
+        to_yicang = 100000000.0
+        for k in klines:
+            parts = k.split(",")
+            if len(parts) >= 2:
+                t_str = parts[0].split(" ")[-1]
+                val = round(float(parts[1]) / to_yicang, 2)
+                timestamps.append(t_str)
+                values.append(val)
+        return {"code": 200, "data": {"timestamps": timestamps, "values": values}}
     except Exception as e:
         print(f"获取板块 {code} 历史走势失败: {e}")
         return {"code": 500, "message": str(e)}
@@ -105,30 +107,11 @@ async def get_sector_stocks(code: str):
         "fields": "f2,f3,f12,f14,f62"
     }
     
-    def _fetch_stocks():
-        import urllib.request
-        import urllib.parse
-        import json
-        query_string = urllib.parse.urlencode(params)
-        req_url = f"{url}?{query_string}"
-        req = urllib.request.Request(req_url, headers={
-            "User-Agent": "Mozilla/5.0"
-        })
-        # 增加 3 次重试机制应对高频切换或网络波动时的握手重连
-        last_err = None
-        for attempt in range(3):
-            try:
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    res_bytes = response.read()
-                    data_dict = json.loads(res_bytes.decode("utf-8"))
-                    return data_dict.get("data", {}).get("diff", []) or []
-            except Exception as e:
-                last_err = e
-                time.sleep(0.1 * (attempt + 1))
-        raise last_err
-
     try:
-        diff = await asyncio.to_thread(_fetch_stocks)
+        client = fetcher.get_client()
+        r = await client.get(url, params=params, headers=fetcher.headers, timeout=5)
+        r.raise_for_status()
+        diff = r.json().get("data", {}).get("diff", []) or []
         stocks = []
         to_yicang = 100000000.0
         for item in diff:

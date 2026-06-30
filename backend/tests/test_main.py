@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app, fetcher
+from unittest.mock import AsyncMock, patch, MagicMock
 
 client = TestClient(app)
 
@@ -26,3 +27,63 @@ def test_websocket_connection():
         # 发送 pong
         websocket.send_json({"type": "pong"})
         # WebSocket 能够正常握手并没有异常关闭
+
+def test_get_sector_history_endpoint():
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "data": {
+            "klines": ["2026-06-30 09:30,12345000000"]
+        }
+    }
+    mock_client.get.return_value = mock_response
+    
+    with patch.object(fetcher, "get_client", return_value=mock_client):
+        response = client.get("/api/sectors/history/BK0437?period=daily")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["code"] == 200
+        assert data["data"]["timestamps"] == ["09:30"]
+        assert data["data"]["values"] == [123.45]
+        mock_client.get.assert_called_once()
+        args, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["klt"] == "101"
+        assert kwargs["params"]["lmt"] == "30"
+
+def test_get_sector_stocks_endpoint():
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "data": {
+            "diff": [
+                {
+                    "f2": 15.5,
+                    "f3": 2.3,
+                    "f12": "600519",
+                    "f14": "贵州茅台",
+                    "f62": 100000000.0
+                }
+            ]
+        }
+    }
+    mock_client.get.return_value = mock_response
+    
+    # Clear cache first to force HTTP call
+    from app.main import stocks_cache
+    stocks_cache.clear()
+    
+    with patch.object(fetcher, "get_client", return_value=mock_client):
+        response = client.get("/api/sectors/BK0437/stocks")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["code"] == 200
+        stocks = data["data"]["stocks"]
+        assert len(stocks) == 1
+        assert stocks[0]["code"] == "600519"
+        assert stocks[0]["name"] == "贵州茅台"
+        assert stocks[0]["price"] == 15.5
+        assert stocks[0]["change_pct"] == 2.3
+        assert stocks[0]["main_net_inflow"] == 1.0
+        mock_client.get.assert_called_once()

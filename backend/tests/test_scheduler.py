@@ -207,3 +207,24 @@ async def test_shutdown_with_none_client():
     await fetcher.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_persistent_client_created_and_closed():
+    mock_manager = AsyncMock()
+    fetcher = DataFetcher(mock_manager)
+    
+    # Verify client is created on loop start/fetch
+    assert fetcher.client is None
+    
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.return_value = AsyncMock(status_code=200, json=lambda: {"data": {"diff": []}})
+        await fetcher.fetch_and_broadcast()
+        
+    assert fetcher.client is not None
+    assert fetcher.client.is_closed is False
+    
+    # Verify client is closed on shutdown
+    await fetcher.shutdown()
+    assert fetcher.client.is_closed is True
+
+
+

@@ -73,9 +73,17 @@ class DataFetcher:
             "User-Agent": "Mozilla/5.0"
         }
 
-    async def fetch_and_broadcast(self) -> Dict:
+    def get_client(self) -> httpx.AsyncClient:
         if self.client is None or self.client.is_closed:
-            self.client = httpx.AsyncClient(transport=UrllibAsyncTransport())
+            # Explicitly disable HTTP/2 to prevent Eastmoney WAF ALPN drops
+            self.client = httpx.AsyncClient(
+                transport=UrllibAsyncTransport(),
+                http2=False
+            )
+        return self.client
+
+    async def fetch_and_broadcast(self) -> Dict:
+        self.get_client()
         
         # 1. 行业板块 (po=1 降序获取主力净流入前 100 名)
         industry_in_params = {
@@ -237,5 +245,6 @@ class DataFetcher:
 
     async def shutdown(self):
         """优雅关闭 HTTP 客户端"""
-        if self.client is not None:
-            await self.client.aclose()
+        if self.client:
+            if getattr(self.client, "is_closed", False) is not True:
+                await self.client.aclose()
