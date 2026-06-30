@@ -164,26 +164,27 @@ class DataFetcher:
             print(f"板块数据处理合并异常: {e}")
             return self.latest_data
             
-        now_cst = datetime.now(cst_tz)
-        current_date = now_cst.strftime("%Y-%m-%d")
-        self.latest_data = {
-            "timestamp": now_cst.strftime("%H:%M:%S"),
-            "industry": formatted_industry,
-            "concept": formatted_concept
-        }
-        
-        # 更新历史折线图缓存 (根据当前分钟记录主力资金累计额)
-        current_min = now_cst.strftime("%H:%M")
-        self._update_history_cache(current_min, formatted_industry + formatted_concept)
-        
-        # 广播给全部连接客户端
-        payload = {
-            "type": "flow_update",
-            "timestamp": self.latest_data["timestamp"],
-            "date": current_date,
-            "data": self.latest_data
-        }
-        await self.manager.broadcast(payload)
+        # 仅在抓取到有效数据记录时更新内存最新缓存并进行广播，防止在网络短暂闪断时用空列表覆盖已有的有效看盘数据
+        if formatted_industry or formatted_concept:
+            now_cst = datetime.now(cst_tz)
+            current_date = now_cst.strftime("%Y-%m-%d")
+            self.latest_data = {
+                "timestamp": now_cst.strftime("%H:%M:%S"),
+                "industry": formatted_industry,
+                "concept": formatted_concept
+            }
+            
+            # 更新历史折线图缓存 (根据当前分钟记录主力资金累计额)
+            current_min = now_cst.strftime("%H:%M")
+            self._update_history_cache(current_min, formatted_industry + formatted_concept)
+            
+            # 广播给全部连接客户端
+            payload = {
+                "type": "flow_update",
+                "date": current_date,
+                "data": self.latest_data
+            }
+            await self.manager.broadcast(payload)
         return self.latest_data
 
     def _safe_float(self, val) -> float:
