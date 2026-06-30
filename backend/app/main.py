@@ -77,9 +77,21 @@ async def get_sector_history(code: str):
         return {"code": 500, "message": str(e)}
 
 
+import time
 from app.config import Config
+
+# 核心个股数据内存缓存，避免高频切换及定时轮询触发东财 CDN 防刷限制，缓存时效 30 秒
+stocks_cache = {}
+
 @app.get("/api/sectors/{code}/stocks")
 async def get_sector_stocks(code: str):
+    # 1. 检查缓存是否命中且有效
+    now_ts = time.time()
+    if code in stocks_cache:
+        cache_ts, cached_stocks = stocks_cache[code]
+        if now_ts - cache_ts < 30.0:
+            return {"code": 200, "data": {"stocks": cached_stocks}}
+
     url = Config.EASTMONEY_API_URL
     params = {
         "pn": "1",
@@ -102,10 +114,18 @@ async def get_sector_stocks(code: str):
         req = urllib.request.Request(req_url, headers={
             "User-Agent": "Mozilla/5.0"
         })
-        with urllib.request.urlopen(req, timeout=5) as response:
-            res_bytes = response.read()
-            data_dict = json.loads(res_bytes.decode("utf-8"))
-            return data_dict.get("data", {}).get("diff", []) or []
+        # 增加 3 次重试机制应对高频切换或网络波动时的握手重连
+        last_err = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    res_bytes = response.read()
+                    data_dict = json.loads(res_bytes.decode("utf-8"))
+                    return data_dict.get("data", {}).get("diff", []) or []
+            except Exception as e:
+                last_err = e
+                time.sleep(0.1 * (attempt + 1))
+        raise last_err
 
     try:
         diff = await asyncio.to_thread(_fetch_stocks)
@@ -131,6 +151,9 @@ async def get_sector_stocks(code: str):
                 "change_pct": safe_float(f3),
                 "main_net_inflow": round(safe_float(f62) / to_yicang, 2)
             })
+        
+        # 2. 成功获取后写入缓存
+        stocks_cache[code] = (time.time(), stocks)
         return {"code": 200, "data": {"stocks": stocks}}
     except Exception as e:
         print(f"获取板块 {code} 核心个股失败: {e}")

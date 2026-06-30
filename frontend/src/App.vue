@@ -69,9 +69,48 @@
             </div>
           </div>
         </div>
-        <div class="h-[250px] bg-panelBg rounded-lg p-4 border border-gray-800 relative">
-          <h2 class="text-lg font-bold mb-2">板块累计资金流入流出趋势 (走势曲线)</h2>
-          <div id="line-chart" style="width: 100%; height: calc(100% - 40px);"></div>
+        <div class="h-[250px] bg-panelBg rounded-lg p-4 border border-gray-800 flex gap-4 overflow-hidden select-none">
+          <!-- 走势曲线 -->
+          <div class="flex-[3] flex flex-col relative h-full min-w-0">
+            <h2 class="text-lg font-bold mb-2">板块累计资金流入流出趋势 (走势曲线)</h2>
+            <div id="line-chart" class="flex-grow w-full"></div>
+          </div>
+          <!-- 核心个股列表 -->
+          <div class="flex-[2] flex flex-col h-full border-l border-gray-800/80 pl-4 min-w-0">
+            <h2 class="text-base font-bold mb-2 text-yellow-500 truncate">
+              {{ selectedSectorName }} 核心个股主力排行
+            </h2>
+            <div class="flex-grow overflow-y-auto space-y-1.5 pr-1 font-mono text-xs scrollbar-thin">
+              <!-- 表头 -->
+              <div class="flex justify-between items-center text-gray-500 font-bold border-b border-gray-800 pb-1 mb-1.5">
+                <span class="w-16">股票</span>
+                <span class="w-12 text-right">最新价</span>
+                <span class="w-16 text-right">涨跌幅</span>
+                <span class="w-16 text-right">主力流入</span>
+              </div>
+              <!-- 列表内容 -->
+              <div 
+                v-for="(stock, idx) in coreStocks" 
+                :key="stock.code" 
+                class="flex justify-between items-center bg-gray-900/30 p-1.5 rounded hover:bg-gray-800/40 transition-colors"
+              >
+                <div class="w-16 truncate">
+                  <span class="text-gray-400 mr-1 text-[10px]">{{ idx + 1 }}</span>
+                  <span class="text-gray-200 font-semibold">{{ stock.name }}</span>
+                </div>
+                <span class="w-12 text-right text-gray-300">{{ stock.price.toFixed(2) }}</span>
+                <span :class="[stock.change_pct >= 0 ? 'text-stockRed' : 'text-stockGreen', 'w-16 text-right font-semibold']">
+                  {{ stock.change_pct >= 0 ? '+' : '' }}{{ stock.change_pct.toFixed(2) }}%
+                </span>
+                <span :class="[stock.main_net_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen', 'w-16 text-right font-bold']">
+                  {{ stock.main_net_inflow >= 0 ? '+' : '' }}{{ stock.main_net_inflow.toFixed(2) }}亿
+                </span>
+              </div>
+              <div v-if="coreStocks.length === 0" class="h-full flex items-center justify-center text-gray-600 text-xs">
+                暂无个股数据
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -150,6 +189,10 @@ const marketTotalFlow = ref(0.0)
 const risingSectorsCount = ref(0)
 const fallingSectorsCount = ref(0)
 
+// 龙头个股资金流向新增响应式属性
+const coreStocks = ref([])
+const selectedSectorName = ref('')
+
 const wsStatusText = computed(() => {
   if (wsStatus.value === 'connecting') return '连接中 🟡'
   if (wsStatus.value === 'connected') return '已连接 🟢'
@@ -180,6 +223,26 @@ const switchTab = (tab) => {
   }
 }
 
+// 维持个股更新的时间阀，降低高频轮询，避免触发东财 CDN 对个股 API 的防刷限制
+let lastStockFetchTime = 0
+
+// 拉取某个板块下的核心龙头个股排行
+const updateCoreStocks = async (code, name) => {
+  selectedSectorName.value = name
+  lastStockFetchTime = Date.now() // 手动切换时，重置静默更新定时器
+  try {
+    const response = await fetch(`/api/sectors/${code}/stocks`)
+    if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
+    const resData = await response.json()
+    if (resData && resData.data && resData.data.stocks) {
+      coreStocks.value = resData.data.stocks
+    }
+  } catch (e) {
+    console.error(`加载板块 ${name} (${code}) 核心个股失败:`, e)
+    coreStocks.value = []
+  }
+}
+
 // 选中某个板块进行高亮渲染
 const selectSector = async (item) => {
   if (engine.value && item) {
@@ -187,6 +250,7 @@ const selectSector = async (item) => {
     engine.value.renderPieChart(item)
     await engine.value.fetchHistoryForSector(item.code)
     engine.value.renderLineChart()
+    updateCoreStocks(item.code, item.name)
   }
 }
 
@@ -271,10 +335,24 @@ const updateDashboard = async (payload) => {
     engine.value.renderPieChart(displaySectors[0])
     await engine.value.fetchHistoryForSector(defaultCode)
     engine.value.renderLineChart()
+    updateCoreStocks(defaultCode, displaySectors[0].name)
   } else if (engine.value.selectedSectorCode) {
     const target = allSectors.find(s => s.code === engine.value.selectedSectorCode)
     if (target) {
       engine.value.renderPieChart(target)
+      selectedSectorName.value = target.name
+      // 30s 轮询时，静默拉取更新当前选中板块的个股排行，实现页面个股数据同步实时滚动更新，同时避免被东财 WAF 限制
+      const now = Date.now()
+      if (now - lastStockFetchTime > 30000) {
+        lastStockFetchTime = now
+        fetch(`/api/sectors/${target.code}/stocks`)
+          .then(r => r.json())
+          .then(res => {
+            if (res && res.data && res.data.stocks) {
+              coreStocks.value = res.data.stocks
+            }
+          }).catch(err => console.error("静默刷新个股失败:", err))
+      }
     }
     engine.value.renderLineChart()
   }
@@ -335,6 +413,11 @@ onMounted(() => {
   // 实例化图表引擎并绑定 Dom 元素
   engine.value = new ChartEngine()
   engine.value.initCharts()
+  
+  // 绑定选中板块回调，以便在 TreeMap 点击时同步拉取核心个股
+  engine.value.onSectorSelect = (code, name) => {
+    updateCoreStocks(code, name)
+  }
 
   connectWS()
   updateTime()
