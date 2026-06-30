@@ -23,41 +23,6 @@ def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     return orig_getaddrinfo(host, port, family, type, proto, flags)
 socket.getaddrinfo = patched_getaddrinfo
 
-# 构造一个桥接 urllib 与 httpx 的 Async 传输层，使得既可以通过所有的 pytest（对 httpx 的 Mock 监听），
-# 又能在生产环境下通过兼容性极佳的 urllib 抓取数据，避免 HTTPX 自身的 TLS/IPv6 问题
-class UrllibAsyncTransport(httpx.AsyncHTTPTransport):
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        headers = dict(request.headers)
-        
-        def sync_req():
-            req = urllib.request.Request(url, headers=headers, method=request.method)
-            if request.content:
-                req.data = request.content
-            
-            # 带重试机制的请求循环 (针对国内网络波动作最大 3 次指数重试)
-            last_err = None
-            for attempt in range(3):
-                try:
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        content = response.read()
-                        h_dict = {}
-                        for k, v in response.headers.items():
-                            h_dict[k] = v
-                        return response.status, h_dict, content
-                except Exception as e:
-                    last_err = e
-                    time.sleep(0.1 * (attempt + 1))
-            raise last_err
-                
-        status_code, resp_headers, content = await asyncio.to_thread(sync_req)
-        return httpx.Response(
-            status_code=status_code,
-            headers=resp_headers,
-            content=content,
-            request=request
-        )
-
 cst_tz = timezone(timedelta(hours=8))
 
 class DataFetcher:
@@ -77,7 +42,6 @@ class DataFetcher:
         if self.client is None or self.client.is_closed:
             # Explicitly disable HTTP/2 to prevent Eastmoney WAF ALPN drops
             self.client = httpx.AsyncClient(
-                transport=UrllibAsyncTransport(),
                 http2=False
             )
         return self.client

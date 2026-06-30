@@ -216,7 +216,11 @@ async def test_persistent_client_created_and_closed():
     assert fetcher.client is None
     
     with patch("httpx.AsyncClient.get") as mock_get:
-        mock_get.return_value = AsyncMock(status_code=200, json=lambda: {"data": {"diff": []}})
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = lambda: {"data": {"diff": []}}
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
         await fetcher.fetch_and_broadcast()
         
     assert fetcher.client is not None

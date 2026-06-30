@@ -199,6 +199,21 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ChartEngine } from './charts.js'
 
+const CONCEPT_BLACKLIST = [
+  "融资融券", "深股通", "沪股通", "富时", "MSCI", "标普", "证金持股", "汇金持股", 
+  "中证", "沪深", "上证", "创业板", "新三板", "国企改革", "央企改革", "标准普尔", 
+  "风格", "AH股", "指数", "50_", "HS300", "深成", "深证", "周期股", "概念股", 
+  "大盘", "小盘", "绩优", "百元股", "破净", "亏损", "预盈", "预增", "预减", 
+  "送转", "壳资源", "独角兽", "次新", "红筹", "权重", "蓝筹", "活跃股", "ST股",
+  "新高", "新低", "近期", "百日", "历史新", "突破", "均线", "多头", "空头", "金叉", "死叉",
+  "昨日", "换手", "东方财富", "题材", "强势", "龙头", "白马", "热门", "中盘", "微盘", "成长", "价值", "股息", "红利"
+]
+const isConceptActive = (name) => {
+  if (CONCEPT_BLACKLIST.some(k => name.includes(k))) return false
+  if (/(?:300|500|1000|180|50|100|800)/.test(name) && !/(?:5G|6G)/i.test(name)) return false
+  return true
+}
+
 const wsStatus = ref('connecting') // connecting, connected, disconnected
 const currentTime = ref('')
 const socket = ref(null)
@@ -232,20 +247,7 @@ const searchStockLinkage = async () => {
       const d = resData.data
       searchQuery.value = ""
       
-      const blacklist = [
-        "融资融券", "深股通", "沪股通", "富时", "MSCI", "标普", "证金持股", "汇金持股", 
-        "中证", "沪深", "上证", "创业板", "新三板", "国企改革", "央企改革", "标准普尔", 
-        "风格", "AH股", "指数", "50_", "HS300", "深成", "深证", "周期股", "概念股", 
-        "大盘", "小盘", "绩优", "百元股", "破净", "亏损", "预盈", "预增", "预减", 
-        "送转", "壳资源", "独角兽", "次新", "红筹", "权重", "蓝筹", "活跃股", "ST股",
-        "新高", "新低", "近期", "百日", "历史新", "突破", "均线", "多头", "空头", "金叉", "死叉",
-        "昨日", "换手", "东方财富", "题材", "强势", "龙头", "白马", "热门", "中盘", "微盘", "成长", "价值", "股息", "红利"
-      ]
-      const filteredConcepts = (d.concepts || []).filter(c => {
-        if (blacklist.some(k => c.name.includes(k))) return false
-        if (/(?:300|500|1000|180|50|100|800)/.test(c.name) && !/(?:5G|6G)/i.test(c.name)) return false
-        return true
-      })
+      const filteredConcepts = (d.concepts || []).filter(c => isConceptActive(c.name))
       
       let targetSector = d.industry
       if (!targetSector && filteredConcepts.length > 0) {
@@ -375,21 +377,7 @@ const updateDashboard = async (payload) => {
     lastReceivedDate.value = payload.date
   }
 
-  const blacklist = [
-    "融资融券", "深股通", "沪股通", "富时", "MSCI", "标普", "证金持股", "汇金持股", 
-    "中证", "沪深", "上证", "创业板", "新三板", "国企改革", "央企改革", "标准普尔", 
-    "风格", "AH股", "指数", "50_", "HS300", "深成", "深证", "周期股", "概念股", 
-    "大盘", "小盘", "绩优", "百元股", "破净", "亏损", "预盈", "预增", "预减", 
-    "送转", "壳资源", "独角兽", "次新", "红筹", "权重", "蓝筹", "活跃股", "ST股",
-    "新高", "新低", "近期", "百日", "历史新", "突破", "均线", "多头", "空头", "金叉", "死叉",
-    "昨日", "换手", "东方财富", "题材", "强势", "龙头", "白马", "热门", "中盘", "微盘", "成长", "价值", "股息", "红利"
-  ]
-  const conceptFiltered = payload.data.concept.filter(s => {
-    if (blacklist.some(k => s.name.includes(k))) return false
-    // 匹配常见的指数数字（如 50, 100, 180, 300, 500, 800, 1000），排除指数板块，但保留 5G、6G 等科技题材
-    if (/(?:300|500|1000|180|50|100|800)/.test(s.name) && !/(?:5G|6G)/i.test(s.name)) return false
-    return true
-  })
+  const conceptFiltered = payload.data.concept.filter(s => isConceptActive(s.name))
   const activeSectors = currentTab.value === 'industry' ? payload.data.industry : conceptFiltered
   const allSectors = [...payload.data.industry, ...conceptFiltered]
 

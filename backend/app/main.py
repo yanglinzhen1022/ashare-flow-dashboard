@@ -111,7 +111,8 @@ async def get_sector_stocks(code: str):
         client = fetcher.get_client()
         r = await client.get(url, params=params, headers=fetcher.headers, timeout=5)
         r.raise_for_status()
-        diff = r.json().get("data", {}).get("diff", []) or []
+        data = r.json().get("data") or {}
+        diff = data.get("diff") or []
         stocks = []
         to_yicang = 100000000.0
         for item in diff:
