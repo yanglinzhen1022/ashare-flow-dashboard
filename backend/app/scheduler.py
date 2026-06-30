@@ -2,11 +2,49 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import httpx
 import time
+import urllib.request
+import urllib.parse
+import json
 from typing import Dict, List
 from app.config import Config
 from app.manager import ConnectionManager
-
 import socket
+
+# 全局打补丁：强制对东财 API 域名使用 IPv4 (AF_INET) 协议，彻底规避国内部分 ISP/网络下的 IPv6 CDN 握手空回复 (Empty reply) 路由黑洞
+orig_getaddrinfo = socket.getaddrinfo
+def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    h_str = host.decode("utf-8") if isinstance(host, bytes) else host
+    if h_str in ("push2his.eastmoney.com", "push2.eastmoney.com"):
+        family = socket.AF_INET
+    return orig_getaddrinfo(host, port, family, type, proto, flags)
+socket.getaddrinfo = patched_getaddrinfo
+
+# 构造一个桥接 urllib 与 httpx 的 Async 传输层，使得既可以通过所有的 pytest（对 httpx 的 Mock 监听），
+# 又能在生产环境下通过兼容性极佳的 urllib 抓取数据，避免 HTTPX 自身的 TLS/IPv6 问题
+class UrllibAsyncTransport(httpx.AsyncHTTPTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        headers = dict(request.headers)
+        
+        def sync_req():
+            req = urllib.request.Request(url, headers=headers, method=request.method)
+            if request.content:
+                req.data = request.content
+            with urllib.request.urlopen(req, timeout=5) as response:
+                content = response.read()
+                # 转换 headers 为 dict
+                h_dict = {}
+                for k, v in response.headers.items():
+                    h_dict[k] = v
+                return response.status, h_dict, content
+                
+        status_code, resp_headers, content = await asyncio.to_thread(sync_req)
+        return httpx.Response(
+            status_code=status_code,
+            headers=resp_headers,
+            content=content,
+            request=request
+        )
 
 cst_tz = timezone(timedelta(hours=8))
 
@@ -25,13 +63,13 @@ class DataFetcher:
 
     async def fetch_and_broadcast(self) -> Dict:
         if self.client is None or self.client.is_closed:
-            self.client = httpx.AsyncClient()
+            self.client = httpx.AsyncClient(transport=UrllibAsyncTransport())
         
         # 1. 行业板块 (po=1 降序获取主力净流入前 100 名)
         industry_in_params = {
             "pn": "1", "pz": "100", "po": "1", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
-            "fs": "m:90 t:2", # 行业板块代码
+            "fs": "m:90 t:2",
             "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
 
@@ -39,7 +77,7 @@ class DataFetcher:
         industry_out_params = {
             "pn": "1", "pz": "100", "po": "0", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
-            "fs": "m:90 t:2", # 行业板块代码
+            "fs": "m:90 t:2",
             "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
         
@@ -47,7 +85,7 @@ class DataFetcher:
         concept_in_params = {
             "pn": "1", "pz": "100", "po": "1", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
-            "fs": "m:90 t:3", # 概念板块代码
+            "fs": "m:90 t:3",
             "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
 
@@ -55,7 +93,7 @@ class DataFetcher:
         concept_out_params = {
             "pn": "1", "pz": "100", "po": "0", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
-            "fs": "m:90 t:3", # 概念板块代码
+            "fs": "m:90 t:3",
             "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
         
@@ -63,7 +101,7 @@ class DataFetcher:
         formatted_concept = []
         
         try:
-            # 并发请求行业和概念流入、流出数据（共 4 个请求）
+            # 使用 HTTP 客户端并发请求数据
             res_ind_in, res_ind_out, res_con_in, res_con_out = await asyncio.gather(
                 self.client.get(self.api_url, params=industry_in_params, headers=self.headers, timeout=5),
                 self.client.get(self.api_url, params=industry_out_params, headers=self.headers, timeout=5),
@@ -77,8 +115,8 @@ class DataFetcher:
             res_con_out.raise_for_status()
             
             # 合并并去重行业板块
-            diff_ind_in = res_ind_in.json().get("data", {}).get("diff", [])
-            diff_ind_out = res_ind_out.json().get("data", {}).get("diff", [])
+            diff_ind_in = res_ind_in.json().get("data", {}).get("diff", []) or []
+            diff_ind_out = res_ind_out.json().get("data", {}).get("diff", []) or []
             
             combined_ind_dict = {}
             for item in diff_ind_in + diff_ind_out:
@@ -89,8 +127,8 @@ class DataFetcher:
             formatted_industry = self._format_items(list(combined_ind_dict.values()))
             
             # 合并并去重概念板块
-            diff_con_in = res_con_in.json().get("data", {}).get("diff", [])
-            diff_con_out = res_con_out.json().get("data", {}).get("diff", [])
+            diff_con_in = res_con_in.json().get("data", {}).get("diff", []) or []
+            diff_con_out = res_con_out.json().get("data", {}).get("diff", []) or []
             
             combined_con_dict = {}
             for item in diff_con_in + diff_con_out:
@@ -101,7 +139,7 @@ class DataFetcher:
             formatted_concept = self._format_items(list(combined_con_dict.values()))
                 
         except Exception as e:
-            print(f"数据抓取失败: {e}")
+            print(f"板块数据处理合并异常: {e}")
             return self.latest_data
             
         now_cst = datetime.now(cst_tz)
