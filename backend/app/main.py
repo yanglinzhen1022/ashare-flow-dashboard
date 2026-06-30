@@ -143,7 +143,61 @@ async def get_sector_stocks(code: str):
         return {"code": 500, "message": str(e)}
 
 
+@app.get("/api/stocks/search")
+async def search_stock(q: str):
+    try:
+        # 1. Resolve stock input to QuoteID
+        client = fetcher.get_client()
+        suggest_url = f"https://searchapi.eastmoney.com/api/suggest/get?input={q}&type=14"
+        r_suggest = await client.get(suggest_url, headers=fetcher.headers, timeout=5)
+        r_suggest.raise_for_status()
+        data_table = r_suggest.json().get("QuotationCodeTable", {}).get("Data", [])
+        if not data_table:
+            return {"code": 404, "message": "未找到匹配个股"}
+        
+        target_stock = data_table[0]
+        quote_id = target_stock.get("QuoteID")
+        stock_code = target_stock.get("Code")
+        stock_name = target_stock.get("Name")
+        
+        # 2. Query stock profile to get sectors f127, f129
+        profile_url = f"https://push2his.eastmoney.com/api/qt/stock/get?secid={quote_id}&fields=f127,f129"
+        r_profile = await client.get(profile_url, headers=fetcher.headers, timeout=5)
+        r_profile.raise_for_status()
+        profile_data = r_profile.json().get("data", {})
+        
+        industry_name = profile_data.get("f127") or ""
+        concept_names_str = profile_data.get("f129") or ""
+        concept_names = [c.strip() for c in concept_names_str.split(",") if c.strip()]
+        
+        # 3. Match against current active list of sectors
+        industry_match = None
+        concept_matches = []
+        
+        # Helper to search matching code
+        all_s = fetcher.latest_data.get("industry", []) + fetcher.latest_data.get("concept", [])
+        for s in all_s:
+            if s["name"] == industry_name:
+                industry_match = {"code": s["code"], "name": s["name"]}
+            elif s["name"] in concept_names:
+                concept_matches.append({"code": s["code"], "name": s["name"]})
+                
+        return {
+            "code": 200,
+            "data": {
+                "stock_code": stock_code,
+                "stock_name": stock_name,
+                "industry": industry_match,
+                "concepts": concept_matches
+            }
+        }
+    except Exception as e:
+        print(f"搜索个股 {q} 失败: {e}")
+        return {"code": 500, "message": str(e)}
+
+
 @app.websocket("/ws/capital-flow")
+
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:

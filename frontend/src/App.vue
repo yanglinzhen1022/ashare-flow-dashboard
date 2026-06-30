@@ -35,6 +35,21 @@
             {{ p.label }}
           </button>
         </div>
+        <!-- 个股反向联动 -->
+        <div class="flex items-center gap-2">
+          <input 
+            v-model="stockQuery" 
+            @keyup.enter="searchStockLinkage"
+            placeholder="查找个股(回车联动板块)..." 
+            class="bg-gray-900 border border-gray-800 rounded px-2.5 py-1 text-xs text-gray-200 focus:outline-none focus:border-stockRed w-44 transition-all font-mono"
+          />
+          <button 
+            @click="searchStockLinkage"
+            class="bg-stockRed text-white text-xs px-2.5 py-1 rounded font-medium hover:bg-red-600 transition-colors"
+          >
+            联动
+          </button>
+        </div>
         <span>系统时间: {{ currentTime }}</span>
       </div>
     </header>
@@ -204,6 +219,53 @@ const fallingSectorsCount = ref(0)
 // 龙头个股资金流向新增响应式属性
 const coreStocks = ref([])
 const selectedSectorName = ref('')
+
+const stockQuery = ref('')
+const searchStockLinkage = async () => {
+  const query = stockQuery.value.trim()
+  if (!query) return
+  try {
+    const response = await fetch(`/api/stocks/search?q=${query}`)
+    if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
+    const resData = await response.json()
+    if (resData.code === 200 && resData.data) {
+      const d = resData.data
+      // Find the first matching sector (prefer Industry, fall back to first Concept)
+      let targetSector = d.industry
+      if (!targetSector && d.concepts && d.concepts.length > 0) {
+        targetSector = d.concepts[0]
+      }
+      
+      if (targetSector) {
+        // Switch tab if needed
+        if (!d.industry && d.concepts && d.concepts.length > 0) {
+          currentTab.value = 'concept'
+        } else {
+          currentTab.value = 'industry'
+        }
+        
+        // Select sector
+        if (engine.value) {
+          engine.value.selectedSectorCode = targetSector.code
+          if (latestPayload.value) {
+            await updateDashboard(latestPayload.value)
+          }
+          // Also fetch stocks for that sector and highlight
+          updateCoreStocks(targetSector.code, targetSector.name)
+        }
+        alert(`已成功通过个股 [${d.stock_name}] 关联到板块 [${targetSector.name}]`)
+      } else {
+        alert(`未找到该个股所属的本看板活跃板块`)
+      }
+    } else {
+      alert(`查找失败: ${resData.message || '未知错误'}`)
+    }
+  } catch (err) {
+    console.error('个股联动检索失败:', err)
+    alert('个股联动检索失败，请重试')
+  }
+}
+
 
 const wsStatusText = computed(() => {
   if (wsStatus.value === 'connecting') return '连接中 🟡'
