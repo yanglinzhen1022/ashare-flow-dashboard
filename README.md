@@ -1,5 +1,7 @@
 # A-Share Capital Flow Dashboard (A股板块资金流向实时监控看板)
 
+![Dashboard Preview](./dashboard_preview.png)
+
 A-Share Capital Flow Dashboard 是一款面向 A 股市场的**实时资金流向监控看板**。系统基于 FastAPI + Vue 3 + ECharts 5 架构，采用科技暗黑风视觉设计，支持全市场行业/概念板块资金流的实时刷新、多周期历史趋势切换、TreeMap 交互式热力图、个股反向联动板块检索等功能，为投资者提供直观的资金流向监控座舱。
 
 ---
