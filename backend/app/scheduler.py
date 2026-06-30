@@ -18,34 +18,51 @@ class DataFetcher:
         self.last_date = datetime.now(cst_tz).strftime("%Y-%m-%d")
         self.client = None
         
-        # 强制解析 push2.eastmoney.com 到 IPv4 地址，规避其 IPv6 CDN 经常性空回复 (Empty reply) 的问题
         self.api_url = Config.EASTMONEY_API_URL
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Host": "push2.eastmoney.com"
         }
+
+    async def fetch_and_broadcast(self) -> Dict:
+        # 动态解析域名到 IPv4 物理地址，避免部分网络/CDN 故障下的 IPv6 强行解析导致 empty reply 或跨天失效问题
         try:
-            ipv4_addr = socket.gethostbyname("push2.eastmoney.com")
+            ipv4_addr = await asyncio.to_thread(socket.gethostbyname, "push2.eastmoney.com")
             if ipv4_addr:
                 self.api_url = f"http://{ipv4_addr}/api/qt/clist/get"
         except Exception as e:
-            print(f"DNS 强制 IPv4 解析失败，回退至默认解析: {e}")
+            print(f"DNS 动态 IPv4 解析失败，使用之前保存的或默认 API URL: {e}")
 
-    async def fetch_and_broadcast(self) -> Dict:
         if self.client is None or self.client.is_closed:
             self.client = httpx.AsyncClient()
         
-        # 1. 行业板块 f62: 主力净流入
-        industry_params = {
-            "pn": "1", "pz": "50", "po": "1", "np": "1",
+        # 1. 行业板块 (po=1 降序获取主力净流入前 100 名)
+        industry_in_params = {
+            "pn": "1", "pz": "100", "po": "1", "np": "1",
+            "fltt": "2", "invt": "2", "fid": "f62",
+            "fs": "m:90 t:2", # 行业板块代码
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
+        }
+
+        # 2. 行业板块 (po=0 升序获取主力净流出前 100 名)
+        industry_out_params = {
+            "pn": "1", "pz": "100", "po": "0", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:2", # 行业板块代码
             "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
         }
         
-        # 2. 概念板块 f62: 主力净流入
-        concept_params = {
-            "pn": "1", "pz": "50", "po": "1", "np": "1",
+        # 3. 概念板块 (po=1 降序获取主力净流入前 100 名)
+        concept_in_params = {
+            "pn": "1", "pz": "100", "po": "1", "np": "1",
+            "fltt": "2", "invt": "2", "fid": "f62",
+            "fs": "m:90 t:3", # 概念板块代码
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
+        }
+
+        # 4. 概念板块 (po=0 升序获取主力净流出前 100 名)
+        concept_out_params = {
+            "pn": "1", "pz": "100", "po": "0", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:3", # 概念板块代码
             "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
@@ -55,20 +72,42 @@ class DataFetcher:
         formatted_concept = []
         
         try:
-            # 并发请求行业和概念数据
-            res_ind, res_con = await asyncio.gather(
-                self.client.get(self.api_url, params=industry_params, headers=self.headers, timeout=5),
-                self.client.get(self.api_url, params=concept_params, headers=self.headers, timeout=5)
+            # 并发请求行业和概念流入、流出数据（共 4 个请求）
+            res_ind_in, res_ind_out, res_con_in, res_con_out = await asyncio.gather(
+                self.client.get(self.api_url, params=industry_in_params, headers=self.headers, timeout=5),
+                self.client.get(self.api_url, params=industry_out_params, headers=self.headers, timeout=5),
+                self.client.get(self.api_url, params=concept_in_params, headers=self.headers, timeout=5),
+                self.client.get(self.api_url, params=concept_out_params, headers=self.headers, timeout=5)
             )
             
-            res_ind.raise_for_status()
-            res_con.raise_for_status()
+            res_ind_in.raise_for_status()
+            res_ind_out.raise_for_status()
+            res_con_in.raise_for_status()
+            res_con_out.raise_for_status()
             
-            diff_ind = res_ind.json().get("data", {}).get("diff", [])
-            formatted_industry = self._format_items(diff_ind)
+            # 合并并去重行业板块
+            diff_ind_in = res_ind_in.json().get("data", {}).get("diff", [])
+            diff_ind_out = res_ind_out.json().get("data", {}).get("diff", [])
             
-            diff_con = res_con.json().get("data", {}).get("diff", [])
-            formatted_concept = self._format_items(diff_con)
+            combined_ind_dict = {}
+            for item in diff_ind_in + diff_ind_out:
+                code = item.get("f12")
+                if code:
+                    combined_ind_dict[code] = item
+            
+            formatted_industry = self._format_items(list(combined_ind_dict.values()))
+            
+            # 合并并去重概念板块
+            diff_con_in = res_con_in.json().get("data", {}).get("diff", [])
+            diff_con_out = res_con_out.json().get("data", {}).get("diff", [])
+            
+            combined_con_dict = {}
+            for item in diff_con_in + diff_con_out:
+                code = item.get("f12")
+                if code:
+                    combined_con_dict[code] = item
+            
+            formatted_concept = self._format_items(list(combined_con_dict.values()))
                 
         except Exception as e:
             print(f"数据抓取失败: {e}")
