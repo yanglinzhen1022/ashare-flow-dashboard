@@ -230,15 +230,31 @@ const searchStockLinkage = async () => {
     const resData = await response.json()
     if (resData.code === 200 && resData.data) {
       const d = resData.data
-      // Find the first matching sector (prefer Industry, fall back to first Concept)
+      searchQuery.value = ""
+      
+      const blacklist = [
+        "融资融券", "深股通", "沪股通", "富时", "MSCI", "标普", "证金持股", "汇金持股", 
+        "中证", "沪深", "上证", "创业板", "新三板", "国企改革", "央企改革", "标准普尔", 
+        "风格", "AH股", "指数", "50_", "HS300", "深成", "深证", "周期股", "概念股", 
+        "大盘", "小盘", "绩优", "百元股", "破净", "亏损", "预盈", "预增", "预减", 
+        "送转", "壳资源", "独角兽", "次新", "红筹", "权重", "蓝筹", "活跃股", "ST股",
+        "新高", "新低", "近期", "百日", "历史新", "突破", "均线", "多头", "空头", "金叉", "死叉",
+        "昨日", "换手", "东方财富", "题材", "强势", "龙头", "白马", "热门", "中盘", "微盘", "成长", "价值", "股息", "红利"
+      ]
+      const filteredConcepts = (d.concepts || []).filter(c => {
+        if (blacklist.some(k => c.name.includes(k))) return false
+        if (/(?:300|500|1000|180|50|100|800)/.test(c.name) && !/(?:5G|6G)/i.test(c.name)) return false
+        return true
+      })
+      
       let targetSector = d.industry
-      if (!targetSector && d.concepts && d.concepts.length > 0) {
-        targetSector = d.concepts[0]
+      if (!targetSector && filteredConcepts.length > 0) {
+        targetSector = filteredConcepts[0]
       }
       
       if (targetSector) {
         // Switch tab if needed
-        if (!d.industry && d.concepts && d.concepts.length > 0) {
+        if (!d.industry && filteredConcepts.length > 0) {
           currentTab.value = 'concept'
         } else {
           currentTab.value = 'industry'

@@ -151,7 +151,9 @@ async def search_stock(q: str):
         suggest_url = f"https://searchapi.eastmoney.com/api/suggest/get?input={q}&type=14"
         r_suggest = await client.get(suggest_url, headers=fetcher.headers, timeout=5)
         r_suggest.raise_for_status()
-        data_table = r_suggest.json().get("QuotationCodeTable", {}).get("Data", [])
+        # Suggest parsing:
+        quotation_table = r_suggest.json().get("QuotationCodeTable") or {}
+        data_table = quotation_table.get("Data") or []
         if not data_table:
             return {"code": 404, "message": "未找到匹配个股"}
         
@@ -164,7 +166,8 @@ async def search_stock(q: str):
         profile_url = f"https://push2his.eastmoney.com/api/qt/stock/get?secid={quote_id}&fields=f127,f129"
         r_profile = await client.get(profile_url, headers=fetcher.headers, timeout=5)
         r_profile.raise_for_status()
-        profile_data = r_profile.json().get("data", {})
+        # Profile parsing:
+        profile_data = r_profile.json().get("data") or {}
         
         industry_name = profile_data.get("f127") or ""
         concept_names_str = profile_data.get("f129") or ""
