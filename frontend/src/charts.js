@@ -27,15 +27,15 @@ export class ChartEngine {
     window.addEventListener('resize', this.resizeHandler)
   }
 
-  async loadHistoryData() {
+  async fetchHistoryForSector(code) {
     try {
-      const response = await fetch('/api/sectors/history')
+      const response = await fetch(`/api/sectors/history/${code}`)
       const result = await response.json()
       if (result.code === 200) {
-        this.historyData = result.data
+        this.historyData[code] = result.data
       }
     } catch (err) {
-      console.error('加载历史累计曲线数据失败:', err)
+      console.error(`加载板块 ${code} 走势失败:`, err)
     }
   }
 
@@ -47,7 +47,7 @@ export class ChartEngine {
       const ratio = s.turnover > 0 ? (s.main_net_inflow / s.turnover) * 100 : 0
       return {
         name: `${s.name}\n${s.main_net_inflow > 0 ? '+' : ''}${s.main_net_inflow}亿\n${s.change_pct}%`,
-        value: [s.turnover, ratio],
+        value: [Math.abs(s.main_net_inflow), ratio],
         code: s.code,
         flow: s.main_net_inflow,
         details: s
@@ -92,6 +92,9 @@ export class ChartEngine {
         roam: false,
         nodeClick: 'select',
         breadcrumb: { show: false },
+        visualMin: -15,
+        visualMax: 15,
+        visualDimension: 1,
         label: {
           show: true,
           formatter: '{b}',
@@ -99,6 +102,7 @@ export class ChartEngine {
         },
         levels: [{
           itemStyle: {
+            colorMappingBy: 'value',
             borderWidth: 2,
             borderColor: '#121827',
             gapWidth: 1
@@ -111,10 +115,11 @@ export class ChartEngine {
 
     // 绑定点击事件，展示对应板块的资金结构和走势
     this.treemapChart.off('click')
-    this.treemapChart.on('click', (params) => {
+    this.treemapChart.on('click', async (params) => {
       if (params.data && params.data.code) {
         this.selectedSectorCode = params.data.code
         this.renderPieChart(params.data.details)
+        await this.fetchHistoryForSector(params.data.code)
         this.renderLineChart()
       }
     })
@@ -149,7 +154,7 @@ export class ChartEngine {
         type: 'line',
         data: history.values,
         smooth: true,
-        showSymbol: false,
+        showSymbol: true,
         lineStyle: { color: lineColor, width: 2 },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -184,6 +189,25 @@ export class ChartEngine {
       }]
     }
     this.pieChart.setOption(option, true)
+  }
+
+  async fetchHistoryForSector(code) {
+    try {
+      const response = await fetch(`/api/sectors/history/${code}`)
+      if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
+      const resData = await response.json()
+      if (resData && resData.timestamps && resData.values) {
+        this.historyData[code] = {
+          timestamps: resData.timestamps,
+          values: resData.values
+        }
+      }
+    } catch (e) {
+      console.error(`加载板块 ${code} 历史走势异常:`, e)
+      if (!this.historyData[code]) {
+        this.historyData[code] = { timestamps: [], values: [] }
+      }
+    }
   }
 
 
