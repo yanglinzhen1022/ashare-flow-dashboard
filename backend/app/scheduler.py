@@ -20,19 +20,10 @@ class DataFetcher:
         
         self.api_url = Config.EASTMONEY_API_URL
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Host": "push2.eastmoney.com"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
     async def fetch_and_broadcast(self) -> Dict:
-        # 动态解析域名到 IPv4 物理地址，避免部分网络/CDN 故障下的 IPv6 强行解析导致 empty reply 或跨天失效问题
-        try:
-            ipv4_addr = await asyncio.to_thread(socket.gethostbyname, "push2.eastmoney.com")
-            if ipv4_addr:
-                self.api_url = f"http://{ipv4_addr}/api/qt/clist/get"
-        except Exception as e:
-            print(f"DNS 动态 IPv4 解析失败，使用之前保存的或默认 API URL: {e}")
-
         if self.client is None or self.client.is_closed:
             self.client = httpx.AsyncClient()
         
