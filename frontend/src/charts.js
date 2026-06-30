@@ -56,7 +56,10 @@ export class ChartEngine {
                      this.currentPeriod === '5d' ? (s.main_net_inflow_5d || 0.0) :
                      this.currentPeriod === '10d' ? (s.main_net_inflow_10d || 0.0) :
                      (s.main_net_inflow || 0.0)
-      const ratio = s.turnover > 0 ? (flowVal / s.turnover) * 100 : 0
+      const periodDays = this.currentPeriod === '3d' ? 3 :
+                         this.currentPeriod === '5d' ? 5 :
+                         this.currentPeriod === '10d' ? 10 : 1
+      const ratio = s.turnover > 0 ? (flowVal / (s.turnover * periodDays)) * 100 : 0
       return {
         name: `${s.name}\n${flowVal > 0 ? '+' : ''}${flowVal.toFixed(2)}亿\n${s.change_pct}%`,
         value: [Math.abs(flowVal), ratio],
@@ -76,7 +79,10 @@ export class ChartEngine {
                          this.currentPeriod === '5d' ? (d.main_net_inflow_5d || 0.0) :
                          this.currentPeriod === '10d' ? (d.main_net_inflow_10d || 0.0) :
                          (d.main_net_inflow || 0.0)
-          const ratio = d.turnover > 0 ? (flowVal / d.turnover) * 100 : 0
+          const periodDays = this.currentPeriod === '3d' ? 3 :
+                             this.currentPeriod === '5d' ? 5 :
+                             this.currentPeriod === '10d' ? 10 : 1
+          const ratio = d.turnover > 0 ? (flowVal / (d.turnover * periodDays)) * 100 : 0
           const labelText = this.currentPeriod === '3d' ? '3日主力净流入' :
                             this.currentPeriod === '5d' ? '5日主力净流入' :
                             this.currentPeriod === '10d' ? '10日主力净流入' :

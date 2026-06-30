@@ -172,7 +172,7 @@
           </div>
         </div>
         <div class="h-[250px] bg-panelBg rounded-lg p-4 border border-gray-800 relative">
-          <h2 class="text-lg font-bold mb-2">所选板块资金分布明细</h2>
+          <h2 class="text-lg font-bold mb-2">所选板块资金结构 (今日分时)</h2>
           <div id="pie-chart" style="width: 100%; height: calc(100% - 40px);"></div>
         </div>
       </div>
@@ -235,13 +235,19 @@ const switchTab = (tab) => {
   }
 }
 
-const switchPeriod = (pId) => {
+const switchPeriod = async (pId) => {
   currentPeriod.value = pId
   if (engine.value) {
     engine.value.currentPeriod = pId
   }
   if (latestPayload.value && engine.value) {
     updateDashboard(latestPayload.value)
+    const activeCode = engine.value.selectedSectorCode
+    if (activeCode) {
+      const historyPeriod = pId !== '1d' ? 'daily' : '1d'
+      await engine.value.fetchHistoryForSector(activeCode, historyPeriod)
+      engine.value.renderLineChart()
+    }
   }
 }
 
@@ -343,22 +349,25 @@ const updateDashboard = async (payload) => {
     .sort((a, b) => getPeriodFlow(a) - getPeriodFlow(b))
     .slice(0, 10)
 
-  // 5. 更新折线走势图的缓存记录
-  const currentMin = payload.data.timestamp.substring(0, 5) // "HH:MM"
-  for (const s of allSectors) {
-    const code = s.code
-    if (!engine.value.historyData[code]) {
-      engine.value.historyData[code] = { timestamps: [], values: [] }
-    }
-    const timestamps = engine.value.historyData[code].timestamps
-    if (!timestamps || timestamps.length === 0) {
-      engine.value.historyData[code].timestamps = [currentMin]
-      engine.value.historyData[code].values = [s.main_net_inflow]
-    } else if (timestamps[timestamps.length - 1] !== currentMin) {
-      engine.value.historyData[code].timestamps.push(currentMin)
-      engine.value.historyData[code].values.push(s.main_net_inflow)
-    } else {
-      engine.value.historyData[code].values[timestamps.length - 1] = s.main_net_inflow
+  // 5. 更新折线走势图的缓存记录 (仅在今日分时周期下进行)
+  if (currentPeriod.value === '1d') {
+    const nowStr = (payload.data && payload.data.timestamp) ? payload.data.timestamp.substring(0, 5) : (payload.time || "")
+    for (const s of allSectors) {
+      const code = s.code
+      if (!engine.value.historyData[code]) {
+        engine.value.historyData[code] = { timestamps: [], values: [] }
+      }
+      const h = engine.value.historyData[code]
+      if (h.timestamps.length === 0 || h.timestamps[h.timestamps.length - 1] !== nowStr) {
+        h.timestamps.push(nowStr)
+        h.values.push(s.main_net_inflow)
+        if (h.timestamps.length > 240) {
+          h.timestamps.shift()
+          h.values.shift()
+        }
+      } else {
+        h.values[h.timestamps.length - 1] = s.main_net_inflow
+      }
     }
   }
 
