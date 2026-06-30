@@ -121,6 +121,9 @@ export class ChartEngine {
         this.renderPieChart(params.data.details)
         await this.fetchHistoryForSector(params.data.code)
         this.renderLineChart()
+        if (typeof this.onSectorSelect === 'function') {
+          this.onSectorSelect(params.data.code, params.data.details?.name || params.data.name)
+        }
       }
     })
   }
@@ -196,10 +199,10 @@ export class ChartEngine {
       const response = await fetch(`/api/sectors/history/${code}`)
       if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
       const resData = await response.json()
-      if (resData && resData.timestamps && resData.values) {
+      if (resData && resData.data && resData.data.timestamps && resData.data.values) {
         this.historyData[code] = {
-          timestamps: resData.timestamps,
-          values: resData.values
+          timestamps: resData.data.timestamps,
+          values: resData.data.values
         }
       }
     } catch (e) {

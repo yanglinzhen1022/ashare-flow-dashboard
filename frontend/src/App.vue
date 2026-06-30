@@ -77,7 +77,7 @@
           </div>
           <!-- 核心个股列表 -->
           <div class="flex-[2] flex flex-col h-full border-l border-gray-800/80 pl-4 min-w-0">
-            <h2 class="text-base font-bold mb-2 text-yellow-500 truncate">
+            <h2 class="text-base font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-400 truncate py-0.5 leading-relaxed">
               {{ selectedSectorName }} 核心个股主力排行
             </h2>
             <div class="flex-grow overflow-y-auto space-y-1.5 pr-1 font-mono text-xs scrollbar-thin">
