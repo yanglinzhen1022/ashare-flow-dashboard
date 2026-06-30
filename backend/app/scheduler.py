@@ -13,9 +13,13 @@ import socket
 # 全局打补丁：强制对东财 API 域名使用 IPv4 (AF_INET) 协议，彻底规避国内部分 ISP/网络下的 IPv6 CDN 握手空回复 (Empty reply) 路由黑洞
 orig_getaddrinfo = socket.getaddrinfo
 def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    h_str = host.decode("utf-8") if isinstance(host, bytes) else host
-    if h_str in ("push2his.eastmoney.com", "push2.eastmoney.com"):
-        family = socket.AF_INET
+    try:
+        h_str = host.decode("utf-8") if isinstance(host, bytes) else host
+        h_clean = h_str.lower().rstrip(".")
+        if "eastmoney.com" in h_clean:
+            family = socket.AF_INET
+    except Exception:
+        pass
     return orig_getaddrinfo(host, port, family, type, proto, flags)
 socket.getaddrinfo = patched_getaddrinfo
 
@@ -30,21 +34,39 @@ class UrllibAsyncTransport(httpx.AsyncHTTPTransport):
             req = urllib.request.Request(url, headers=headers, method=request.method)
             if request.content:
                 req.data = request.content
-            with urllib.request.urlopen(req, timeout=5) as response:
-                content = response.read()
-                # 转换 headers 为 dict
-                h_dict = {}
-                for k, v in response.headers.items():
-                    h_dict[k] = v
-                return response.status, h_dict, content
+            
+            # 带重试机制的请求循环 (针对国内网络波动作最大 3 次指数重试)
+            last_err = None
+            for attempt in range(3):
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        content = response.read()
+                        h_dict = {}
+                        for k, v in response.headers.items():
+                            h_dict[k] = v
+                        return response.status, h_dict, content
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.1 * (attempt + 1))
+            raise last_err
                 
-        status_code, resp_headers, content = await asyncio.to_thread(sync_req)
-        return httpx.Response(
-            status_code=status_code,
-            headers=resp_headers,
-            content=content,
-            request=request
-        )
+        try:
+            status_code, resp_headers, content = await asyncio.to_thread(sync_req)
+            return httpx.Response(
+                status_code=status_code,
+                headers=resp_headers,
+                content=content,
+                request=request
+            )
+        except Exception as e:
+            # 优雅故障降级，确保 3 次重试失败后也只返回空列表 JSON，绝不抛异常导致整个后台长连接抓取任务崩溃中断
+            print(f"[UrllibAsyncTransport] HTTP 请求重试失败且已降级: {e}")
+            return httpx.Response(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                content=b'{"rc":0,"data":{"diff":[]}}',
+                request=request
+            )
 
 cst_tz = timezone(timedelta(hours=8))
 
