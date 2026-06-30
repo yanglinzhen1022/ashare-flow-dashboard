@@ -90,7 +90,7 @@ class DataFetcher:
             "pn": "1", "pz": "100", "po": "1", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:2",
-            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84,f267,f269,f174"
         }
 
         # 2. 行业板块 (po=0 升序获取主力净流出前 100 名)
@@ -98,7 +98,7 @@ class DataFetcher:
             "pn": "1", "pz": "100", "po": "0", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:2",
-            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84,f267,f269,f174"
         }
         
         # 3. 概念板块 (po=1 降序获取主力净流入前 100 名)
@@ -106,7 +106,7 @@ class DataFetcher:
             "pn": "1", "pz": "100", "po": "1", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:3",
-            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84,f267,f269,f174"
         }
 
         # 4. 概念板块 (po=0 升序获取主力净流出前 100 名)
@@ -114,7 +114,7 @@ class DataFetcher:
             "pn": "1", "pz": "100", "po": "0", "np": "1",
             "fltt": "2", "invt": "2", "fid": "f62",
             "fs": "m:90 t:3",
-            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84"
+            "fields": "f6,f12,f14,f3,f62,f66,f72,f78,f84,f267,f269,f174"
         }
         
         formatted_industry = []
@@ -210,6 +210,9 @@ class DataFetcher:
                 "change_pct": self._safe_float(item.get("f3")),
                 "turnover": turnover,
                 "main_net_inflow": round(self._safe_float(item.get("f62")) / to_yicang, 2),
+                "main_net_inflow_3d": round(self._safe_float(item.get("f267")) / to_yicang, 2),
+                "main_net_inflow_5d": round(self._safe_float(item.get("f269")) / to_yicang, 2),
+                "main_net_inflow_10d": round(self._safe_float(item.get("f174")) / to_yicang, 2),
                 "super_large_inflow": round(self._safe_float(item.get("f66")) / to_yicang, 2),
                 "large_inflow": round(self._safe_float(item.get("f72")) / to_yicang, 2),
                 "medium_inflow": round(self._safe_float(item.get("f78")) / to_yicang, 2),

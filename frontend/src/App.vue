@@ -24,6 +24,17 @@
       </div>
       <div class="text-gray-400 text-sm font-mono flex items-center gap-4">
         <span>实时刷新(3s/次)</span>
+        <!-- 周期切换器 -->
+        <div class="flex bg-gray-900/60 p-0.5 rounded border border-gray-800 text-xs font-mono select-none">
+          <button 
+            v-for="p in [{id: '1d', label: '今日'}, {id: '3d', label: '3日'}, {id: '5d', label: '5日'}, {id: '10d', label: '10日'}]" 
+            :key="p.id"
+            @click="switchPeriod(p.id)"
+            :class="['px-2.5 py-0.5 rounded transition-all', currentPeriod === p.id ? 'bg-stockRed text-white font-semibold' : 'text-gray-400 hover:text-gray-200']"
+          >
+            {{ p.label }}
+          </button>
+        </div>
         <span>系统时间: {{ currentTime }}</span>
       </div>
     </header>
@@ -135,7 +146,7 @@
                 >
                   <span class="text-gray-400 font-bold w-4">{{ idx + 1 }}</span>
                   <span class="text-gray-200 font-medium truncate w-16">{{ item.name }}</span>
-                  <span class="text-stockRed font-bold">+{{ item.main_net_inflow.toFixed(2) }}亿</span>
+                  <span class="text-stockRed font-bold">+{{ getPeriodFlow(item).toFixed(2) }}亿</span>
                 </div>
               </TransitionGroup>
             </div>
@@ -154,7 +165,7 @@
                 >
                   <span class="text-gray-400 font-bold w-4">{{ idx + 1 }}</span>
                   <span class="text-gray-200 font-medium truncate w-16">{{ item.name }}</span>
-                  <span class="text-stockGreen font-bold">{{ item.main_net_inflow.toFixed(2) }}亿</span>
+                  <span class="text-stockGreen font-bold">{{ getPeriodFlow(item).toFixed(2) }}亿</span>
                 </div>
               </TransitionGroup>
             </div>
@@ -182,6 +193,7 @@ const outflowRanking = ref([])
 const lastReceivedDate = ref('')
 const currentTab = ref('industry') // 'industry' or 'concept'
 const latestPayload = ref(null)
+const currentPeriod = ref('1d') // '1d', '3d', '5d', '10d'
 
 // 优化交互新增的响应式属性
 const searchQuery = ref('')
@@ -223,6 +235,24 @@ const switchTab = (tab) => {
   }
 }
 
+const switchPeriod = (pId) => {
+  currentPeriod.value = pId
+  if (engine.value) {
+    engine.value.currentPeriod = pId
+  }
+  if (latestPayload.value && engine.value) {
+    updateDashboard(latestPayload.value)
+  }
+}
+
+const getPeriodFlow = (s) => {
+  if (!s) return 0.0
+  if (currentPeriod.value === '3d') return s.main_net_inflow_3d || 0.0
+  if (currentPeriod.value === '5d') return s.main_net_inflow_5d || 0.0
+  if (currentPeriod.value === '10d') return s.main_net_inflow_10d || 0.0
+  return s.main_net_inflow || 0.0
+}
+
 // 维持个股更新的时间阀，降低高频轮询，避免触发东财 CDN 对个股 API 的防刷限制
 let lastStockFetchTime = 0
 
@@ -248,7 +278,8 @@ const selectSector = async (item) => {
   if (engine.value && item) {
     engine.value.selectedSectorCode = item.code
     engine.value.renderPieChart(item)
-    await engine.value.fetchHistoryForSector(item.code)
+    const historyPeriod = currentPeriod.value !== '1d' ? 'daily' : '1d'
+    await engine.value.fetchHistoryForSector(item.code, historyPeriod)
     engine.value.renderLineChart()
     updateCoreStocks(item.code, item.name)
   }
@@ -283,9 +314,10 @@ const updateDashboard = async (payload) => {
   let positiveCount = 0
   let negativeCount = 0
   for (const s of activeSectors) {
-    totalFlow += s.main_net_inflow
-    if (s.main_net_inflow > 0) positiveCount++
-    else if (s.main_net_inflow < 0) negativeCount++
+    const flow = getPeriodFlow(s)
+    totalFlow += flow
+    if (flow > 0) positiveCount++
+    else if (flow < 0) negativeCount++
   }
   marketTotalFlow.value = totalFlow
   risingSectorsCount.value = positiveCount
@@ -302,13 +334,13 @@ const updateDashboard = async (payload) => {
 
   // 4. 更新排行榜 (依然使用原始 top 10 便于直观把握全局最强流入流出)
   inflowRanking.value = activeSectors
-    .filter(s => s.main_net_inflow > 0)
-    .sort((a, b) => b.main_net_inflow - a.main_net_inflow)
+    .filter(s => getPeriodFlow(s) > 0)
+    .sort((a, b) => getPeriodFlow(b) - getPeriodFlow(a))
     .slice(0, 10)
 
   outflowRanking.value = activeSectors
-    .filter(s => s.main_net_inflow < 0)
-    .sort((a, b) => a.main_net_inflow - b.main_net_inflow)
+    .filter(s => getPeriodFlow(s) < 0)
+    .sort((a, b) => getPeriodFlow(a) - getPeriodFlow(b))
     .slice(0, 10)
 
   // 5. 更新折线走势图的缓存记录
@@ -335,7 +367,8 @@ const updateDashboard = async (payload) => {
     const defaultCode = displaySectors[0].code
     engine.value.selectedSectorCode = defaultCode
     engine.value.renderPieChart(displaySectors[0])
-    await engine.value.fetchHistoryForSector(defaultCode)
+    const historyPeriod = currentPeriod.value !== '1d' ? 'daily' : '1d'
+    await engine.value.fetchHistoryForSector(defaultCode, historyPeriod)
     engine.value.renderLineChart()
     updateCoreStocks(defaultCode, displaySectors[0].name)
   } else if (engine.value.selectedSectorCode) {
@@ -414,6 +447,7 @@ let clockInterval = null
 onMounted(() => {
   // 实例化图表引擎并绑定 Dom 元素
   engine.value = new ChartEngine()
+  engine.value.currentPeriod = currentPeriod.value
   engine.value.initCharts()
   
   // 绑定选中板块回调，以便在 TreeMap 点击时同步拉取核心个股

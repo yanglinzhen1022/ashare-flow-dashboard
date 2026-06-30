@@ -8,6 +8,7 @@ export class ChartEngine {
     this.historyData = {}
     this.selectedSectorCode = null
     this.resizeHandler = null
+    this.currentPeriod = '1d'
   }
 
   initCharts() {
@@ -27,15 +28,22 @@ export class ChartEngine {
     window.addEventListener('resize', this.resizeHandler)
   }
 
-  async fetchHistoryForSector(code) {
+  async fetchHistoryForSector(code, period = "1d") {
     try {
-      const response = await fetch(`/api/sectors/history/${code}`)
-      const result = await response.json()
-      if (result.code === 200) {
-        this.historyData[code] = result.data
+      const response = await fetch(`/api/sectors/history/${code}?period=${period === "daily" ? "daily" : "1"}`)
+      if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
+      const resData = await response.json()
+      if (resData && resData.data && resData.data.timestamps && resData.data.values) {
+        this.historyData[code] = {
+          timestamps: resData.data.timestamps,
+          values: resData.data.values
+        }
       }
-    } catch (err) {
-      console.error(`加载板块 ${code} 走势失败:`, err)
+    } catch (e) {
+      console.error(`加载板块 ${code} 历史走势异常:`, e)
+      if (!this.historyData[code]) {
+        this.historyData[code] = { timestamps: [], values: [] }
+      }
     }
   }
 
@@ -44,12 +52,16 @@ export class ChartEngine {
 
     // TreeMap 数据节点构造
     const data = allSectors.map(s => {
-      const ratio = s.turnover > 0 ? (s.main_net_inflow / s.turnover) * 100 : 0
+      const flowVal = this.currentPeriod === '3d' ? (s.main_net_inflow_3d || 0.0) :
+                     this.currentPeriod === '5d' ? (s.main_net_inflow_5d || 0.0) :
+                     this.currentPeriod === '10d' ? (s.main_net_inflow_10d || 0.0) :
+                     (s.main_net_inflow || 0.0)
+      const ratio = s.turnover > 0 ? (flowVal / s.turnover) * 100 : 0
       return {
-        name: `${s.name}\n${s.main_net_inflow > 0 ? '+' : ''}${s.main_net_inflow}亿\n${s.change_pct}%`,
-        value: [Math.abs(s.main_net_inflow), ratio],
+        name: `${s.name}\n${flowVal > 0 ? '+' : ''}${flowVal.toFixed(2)}亿\n${s.change_pct}%`,
+        value: [Math.abs(flowVal), ratio],
         code: s.code,
-        flow: s.main_net_inflow,
+        flow: flowVal,
         details: s
       }
     })
@@ -60,12 +72,20 @@ export class ChartEngine {
         formatter: (info) => {
           const d = info.data?.details
           if (!d) return ''
-          const ratio = d.turnover > 0 ? (d.main_net_inflow / d.turnover) * 100 : 0
+          const flowVal = this.currentPeriod === '3d' ? (d.main_net_inflow_3d || 0.0) :
+                         this.currentPeriod === '5d' ? (d.main_net_inflow_5d || 0.0) :
+                         this.currentPeriod === '10d' ? (d.main_net_inflow_10d || 0.0) :
+                         (d.main_net_inflow || 0.0)
+          const ratio = d.turnover > 0 ? (flowVal / d.turnover) * 100 : 0
+          const labelText = this.currentPeriod === '3d' ? '3日主力净流入' :
+                            this.currentPeriod === '5d' ? '5日主力净流入' :
+                            this.currentPeriod === '10d' ? '10日主力净流入' :
+                            '今日主力净流入'
           return `
             <div class="p-2 font-mono text-sm text-white">
               <b class="text-base">${d.name}</b> (${d.code})<br/>
               今日涨跌幅: <span style="color: ${d.change_pct >= 0 ? '#FF4D4F' : '#22C55E'};">${d.change_pct}%</span><br/>
-              主力净流入: <span style="color: ${d.main_net_inflow >= 0 ? '#FF4D4F' : '#22C55E'};">${d.main_net_inflow} 亿</span><br/>
+              ${labelText}: <span style="color: ${flowVal >= 0 ? '#FF4D4F' : '#22C55E'};">${flowVal.toFixed(2)} 亿</span><br/>
               主力净流入占比: <span style="color: ${ratio >= 0 ? '#FF4D4F' : '#22C55E'};">${ratio.toFixed(2)}%</span><br/>
               成交额: <span>${d.turnover.toFixed(2)} 亿</span><br/>
               <hr class="border-gray-800 my-1"/>
@@ -128,7 +148,8 @@ export class ChartEngine {
       if (params.data && params.data.code) {
         this.selectedSectorCode = params.data.code
         this.renderPieChart(params.data.details)
-        await this.fetchHistoryForSector(params.data.code)
+        const periodParam = this.currentPeriod !== '1d' ? 'daily' : '1d'
+        await this.fetchHistoryForSector(params.data.code, periodParam)
         this.renderLineChart()
         if (typeof this.onSectorSelect === 'function') {
           this.onSectorSelect(params.data.code, params.data.details?.name || params.data.name)
@@ -203,24 +224,6 @@ export class ChartEngine {
     this.pieChart.setOption(option, true)
   }
 
-  async fetchHistoryForSector(code) {
-    try {
-      const response = await fetch(`/api/sectors/history/${code}`)
-      if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
-      const resData = await response.json()
-      if (resData && resData.data && resData.data.timestamps && resData.data.values) {
-        this.historyData[code] = {
-          timestamps: resData.data.timestamps,
-          values: resData.data.values
-        }
-      }
-    } catch (e) {
-      console.error(`加载板块 ${code} 历史走势异常:`, e)
-      if (!this.historyData[code]) {
-        this.historyData[code] = { timestamps: [], values: [] }
-      }
-    }
-  }
 
 
 
