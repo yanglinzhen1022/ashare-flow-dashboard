@@ -104,28 +104,29 @@
           <!-- 核心个股列表 -->
           <div class="flex-[2] flex flex-col h-full border-l border-gray-800/80 pl-4 min-w-0">
             <h2 class="text-base font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-400 truncate py-0.5 leading-relaxed flex-shrink-0">
-              {{ selectedSectorName }} 核心个股主力排行
+              {{ selectedSectorName }} 核心个股主力排行 {{ coreStocks.length > 0 ? `(Top ${coreStocks.length})` : '' }}
             </h2>
             <div class="flex-grow overflow-y-auto space-y-1.5 pr-1 font-mono text-xs scrollbar-thin">
               <!-- 表头 -->
               <div class="flex justify-between items-center text-gray-500 font-bold border-b border-gray-800 pb-1 mb-1.5">
-                <span class="w-16">股票</span>
+                <span class="flex-1 min-w-0">股票</span>
                 <span class="w-12 text-right">最新价</span>
-                <span class="w-16 text-right">涨跌幅</span>
+                <span class="w-14 text-right">涨跌幅</span>
                 <span class="w-16 text-right">主力流入</span>
               </div>
               <!-- 列表内容 -->
               <div 
                 v-for="(stock, idx) in coreStocks" 
                 :key="stock.code" 
-                class="flex justify-between items-center bg-gray-900/30 p-1.5 rounded hover:bg-gray-800/40 transition-colors"
+                @click="openStockModal(stock)"
+                class="flex justify-between items-center bg-gray-900/30 p-1.5 rounded hover:bg-gray-800/60 hover:border-stockRed/50 border border-transparent transition-colors cursor-pointer"
               >
-                <div class="w-16 truncate">
-                  <span class="text-gray-400 mr-1 text-[10px]">{{ idx + 1 }}</span>
-                  <span class="text-gray-200 font-semibold">{{ stock.name }}</span>
+                <div class="flex items-center min-w-0 flex-1 pr-1 truncate">
+                  <span class="text-gray-400 mr-1 text-[10px] w-4 inline-block text-right flex-shrink-0">{{ idx + 1 }}</span>
+                  <span class="text-gray-200 font-semibold truncate">{{ stock.name }}</span>
                 </div>
                 <span class="w-12 text-right text-gray-300">{{ stock.price.toFixed(2) }}</span>
-                <span :class="[stock.change_pct >= 0 ? 'text-stockRed' : 'text-stockGreen', 'w-16 text-right font-semibold']">
+                <span :class="[stock.change_pct >= 0 ? 'text-stockRed' : 'text-stockGreen', 'w-14 text-right font-semibold']">
                   {{ stock.change_pct >= 0 ? '+' : '' }}{{ stock.change_pct.toFixed(2) }}%
                 </span>
                 <span :class="[stock.main_net_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen', 'w-16 text-right font-bold']">
@@ -192,11 +193,89 @@
         </div>
       </div>
     </main>
+
+    <!-- 个股详情弹窗 -->
+    <div 
+      v-if="modalVisible" 
+      @click.self="closeStockModal"
+      class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center"
+    >
+      <div class="w-[760px] h-[560px] bg-panelBg rounded-xl border border-gray-700 shadow-2xl flex flex-col p-5 select-none">
+        <!-- 弹窗头部 -->
+        <div class="flex justify-between items-center mb-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <h3 class="text-xl font-bold truncate">{{ modalStock.name }}</h3>
+            <span class="text-gray-500 font-mono text-sm">{{ modalStock.code }}</span>
+            <template v-if="modalData && modalData.last_price != null">
+              <span class="font-mono text-lg font-bold" :class="modalData.change_pct >= 0 ? 'text-stockRed' : 'text-stockGreen'">
+                {{ modalData.last_price.toFixed(2) }}
+              </span>
+              <span class="font-mono text-sm font-semibold px-1.5 py-0.5 rounded" :class="modalData.change_pct >= 0 ? 'text-stockRed bg-stockRed/10' : 'text-stockGreen bg-stockGreen/10'">
+                {{ modalData.change_pct >= 0 ? '+' : '' }}{{ modalData.change_pct.toFixed(2) }}%
+              </span>
+            </template>
+          </div>
+          <div class="flex items-center gap-3">
+            <!-- 分时/日K切换 -->
+            <div class="flex bg-gray-900/60 p-0.5 rounded border border-gray-800 text-xs font-mono">
+              <button 
+                @click="switchModalTab('intraday')"
+                :class="['px-2.5 py-0.5 rounded transition-all', modalTab === 'intraday' ? 'bg-stockRed text-white font-semibold' : 'text-gray-400 hover:text-gray-200']"
+              >分时</button>
+              <button 
+                @click="switchModalTab('kline')"
+                :class="['px-2.5 py-0.5 rounded transition-all', modalTab === 'kline' ? 'bg-stockRed text-white font-semibold' : 'text-gray-400 hover:text-gray-200']"
+              >日K</button>
+            </div>
+            <button @click="closeStockModal" class="text-gray-500 hover:text-gray-200 text-xl leading-none px-1">×</button>
+          </div>
+        </div>
+        <!-- 图表区域 -->
+        <div class="flex-1 min-h-0 relative">
+          <div v-if="modalLoading || modalError" class="absolute inset-0 z-10 flex items-center justify-center text-gray-500 text-sm bg-panelBg">
+            <span v-if="modalLoading" class="animate-pulse">加载中...</span>
+            <span v-else>{{ modalError }}</span>
+          </div>
+          <!-- 分时与日K各用独立实例/独立DOM, 结构互不影响 -->
+          <div id="stock-modal-chart" v-show="modalTab === 'intraday'" class="absolute inset-0"></div>
+          <div id="stock-modal-kline-chart" v-show="modalTab === 'kline'" class="absolute inset-0"></div>
+        </div>
+        <!-- 今日资金流指标 (仅分时页签) -->
+        <div 
+          v-if="modalTab === 'intraday' && modalData && !modalLoading && !modalError"
+          class="grid grid-cols-5 gap-2 mt-3 border-t border-gray-800 pt-2 text-[11px] font-mono"
+        >
+          <div class="bg-gray-900/40 rounded p-1.5 border-l-2" :class="modalData.main_net_inflow >= 0 ? 'border-stockRed' : 'border-stockGreen'">
+            <div class="text-gray-500">主力净流入</div>
+            <div class="font-bold text-sm" :class="modalData.main_net_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen'">{{ modalData.main_net_inflow.toFixed(2) }}亿</div>
+          </div>
+          <div class="bg-gray-900/40 rounded p-1.5 border-l-2" :class="modalData.super_large_inflow >= 0 ? 'border-stockRed' : 'border-stockGreen'">
+            <div class="text-gray-500">超大单</div>
+            <div class="font-bold text-sm" :class="modalData.super_large_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen'">{{ modalData.super_large_inflow.toFixed(2) }}亿</div>
+          </div>
+          <div class="bg-gray-900/40 rounded p-1.5 border-l-2" :class="modalData.large_inflow >= 0 ? 'border-stockRed' : 'border-stockGreen'">
+            <div class="text-gray-500">大单</div>
+            <div class="font-bold text-sm" :class="modalData.large_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen'">{{ modalData.large_inflow.toFixed(2) }}亿</div>
+          </div>
+          <div class="bg-gray-900/40 rounded p-1.5 border-l-2" :class="modalData.medium_inflow >= 0 ? 'border-stockRed' : 'border-stockGreen'">
+            <div class="text-gray-500">中单</div>
+            <div class="font-bold text-sm" :class="modalData.medium_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen'">{{ modalData.medium_inflow.toFixed(2) }}亿</div>
+          </div>
+          <div class="bg-gray-900/40 rounded p-1.5 border-l-2" :class="modalData.small_inflow >= 0 ? 'border-stockRed' : 'border-stockGreen'">
+            <div class="text-gray-500">小单</div>
+            <div class="font-bold text-sm" :class="modalData.small_inflow >= 0 ? 'text-stockRed' : 'text-stockGreen'">{{ modalData.small_inflow.toFixed(2) }}亿</div>
+          </div>
+        </div>
+        <div v-else-if="modalTab === 'kline' && !modalLoading && !modalError" class="text-[10px] text-gray-600 mt-2 text-center font-mono">
+          滚轮缩放 K 线区间 · 红涨绿跌 · 前复权
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { ChartEngine } from './charts.js'
 
 const CONCEPT_BLACKLIST = [
@@ -235,12 +314,94 @@ const fallingSectorsCount = ref(0)
 const coreStocks = ref([])
 const selectedSectorName = ref('')
 
+// 个股详情弹窗状态
+const modalVisible = ref(false)
+const modalTab = ref('intraday') // 'intraday' | 'kline'
+const modalStock = ref({ code: '', name: '' })
+const modalData = ref(null)
+const modalLoading = ref(false)
+const modalError = ref('')
+let modalEscHandler = null
+
+const renderModalChart = () => {
+  if (!engine.value || !modalData.value) return
+  if (modalTab.value === 'kline') {
+    engine.value.renderStockKline(modalData.value)
+  } else {
+    engine.value.renderStockIntraday(modalData.value)
+  }
+}
+
+const loadModalData = async () => {
+  modalLoading.value = true
+  modalError.value = ''
+  modalData.value = null
+  try {
+    const path = modalTab.value === 'kline' ? 'kline' : 'intraday'
+    const response = await fetch(`/api/stocks/${modalStock.value.code}/${path}`)
+    if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
+    const resData = await response.json()
+    if (resData.code === 200 && resData.data) {
+      modalData.value = resData.data
+      // 先解除 loading 再等 DOM: 指标卡/说明行的 v-if 含 !modalLoading,
+      // 若在渲染后才解除, 它们的插入会使容器缩高而无人 resize
+      // (canvas 固化在旧高度, 溢出压住指标卡)。提前解除让全部布局元素
+      // 在 nextTick 的一次 patch 中就位, 图表 init/渲染一次到位
+      modalLoading.value = false
+      await nextTick()
+      // 初始化当前页签的图表实例 (分时/日K各自独立), 并同步尺寸后渲染
+      if (engine.value.prepareModalChart(modalTab.value)) {
+        renderModalChart()
+      }
+    } else {
+      modalError.value = resData.message || '数据加载失败'
+    }
+  } catch (e) {
+    console.error('加载个股详情失败:', e)
+    modalError.value = '数据加载失败, 请稍后重试'
+  } finally {
+    modalLoading.value = false
+  }
+}
+
+const openStockModal = async (stock) => {
+  modalStock.value = { code: stock.code, name: stock.name }
+  modalTab.value = 'intraday'
+  modalVisible.value = true
+  // ESC 键关闭弹窗
+  modalEscHandler = (e) => {
+    if (e.key === 'Escape') closeStockModal()
+  }
+  window.addEventListener('keydown', modalEscHandler)
+  await loadModalData()
+}
+
+const closeStockModal = () => {
+  modalVisible.value = false
+  modalData.value = null
+  modalError.value = ''
+  if (modalEscHandler) {
+    window.removeEventListener('keydown', modalEscHandler)
+    modalEscHandler = null
+  }
+  // 彻底注销弹窗 ECharts 实例, 防止内存泄漏
+  if (engine.value) {
+    engine.value.disposeModalChart()
+  }
+}
+
+const switchModalTab = (tab) => {
+  if (modalTab.value === tab) return
+  modalTab.value = tab
+  loadModalData()
+}
+
 const stockQuery = ref('')
 const searchStockLinkage = async () => {
   const query = stockQuery.value.trim()
   if (!query) return
   try {
-    const response = await fetch(`/api/stocks/search?q=${query}`)
+    const response = await fetch(`/api/stocks/search?q=${encodeURIComponent(query)}`)
     if (!response.ok) throw new Error(`HTTP status: ${response.status}`)
     const resData = await response.json()
     if (resData.code === 200 && resData.data) {
@@ -537,6 +698,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   isUnmounted = true
+  // 若弹窗仍打开, 先关闭以清理 ECharts 实例与 ESC 监听
+  if (modalVisible.value) {
+    closeStockModal()
+  }
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout)
   }

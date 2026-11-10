@@ -24,7 +24,11 @@ All planned features and code-review fixes for the A-Share Capital Flow Dashboar
    - UI switches page tab and highlights corresponding sectors on stock input.
    - The concept blacklist is DRY-refactored into `isConceptActive` helper.
 5. **Robust Test Suite:**
-   - 18/18 tests pass with 0 warnings. Tests mock network calls and restore state (`fetcher.latest_data`) cleanly.
+   - 26/26 tests pass with 0 warnings. Tests mock network calls and restore state (`fetcher.latest_data`) cleanly.
+6. **Core Stocks Ranking Expanded to Top 50:**
+   - `/api/sectors/{code}/stocks` supports configurable `limit` parameter, defaulting to `50` (up from `10`).
+   - Caching layer dynamically adjusts to requested limit, keeping 30s TTL.
+   - Frontend UI layout dynamically shows `(Top N)` badge with seamless scroll support and aligned rank numbers.
 
 ---
 

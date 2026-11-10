@@ -5,6 +5,7 @@ export class ChartEngine {
     this.treemapChart = null
     this.lineChart = null
     this.pieChart = null
+    this.modalChart = null
     this.historyData = {}
     this.selectedSectorCode = null
     this.resizeHandler = null
@@ -24,6 +25,11 @@ export class ChartEngine {
       this.treemapChart && this.treemapChart.resize()
       this.lineChart && this.lineChart.resize()
       this.pieChart && this.pieChart.resize()
+      // 弹窗实例: display:none 的页签 (offsetParent 为 null) 不 resize,
+      // 切换页签时 prepareModalChart 的渲染前同步会补上
+      for (const chart of [this.modalChart, this.modalKlineChart]) {
+        if (chart && chart.getDom().offsetParent !== null) chart.resize()
+      }
     }
     window.addEventListener('resize', this.resizeHandler)
   }
@@ -203,7 +209,8 @@ export class ChartEngine {
         }
       }]
     }
-    this.lineChart.setOption(option, true)
+    // 实验: notMerge=true 在与 window resize 竞争时触发 ECharts pipeline 空引用, 改为增量合并
+    this.lineChart.setOption(option)
   }
 
   renderPieChart(d) {
@@ -230,6 +237,225 @@ export class ChartEngine {
     this.pieChart.setOption(option, true)
   }
 
+  // 弹窗分时/日K使用两个独立的 ECharts 实例:
+  // echarts 5.6 在同一实例上跨结构切换组件数量 (分时单grid↔日K双grid) 时,
+  // pipeline 按 uid 复用 series task, 可能引用尚未初始化 coordinateSystem
+  // 的 model (dataSample processor 读 .type 崩溃), 且崩溃会中断 resize 重排,
+  // 造成布局停留在旧尺寸。两个实例各自结构固定, 从源头消除该竞态。
+  // 各实例仅增量 setOption (数据数组整体替换), 无需 replaceMerge。
+  prepareModalChart(tab) {
+    const id = tab === 'kline' ? 'stock-modal-kline-chart' : 'stock-modal-chart'
+    const key = tab === 'kline' ? 'modalKlineChart' : 'modalChart'
+    let inst = this[key]
+    if (!inst) {
+      const dom = document.getElementById(id)
+      if (!dom) return null
+      inst = echarts.init(dom, 'dark')
+      this[key] = inst
+    }
+    // 渲染前同步实例尺寸到容器真实尺寸: 页签切换会改变容器高度
+    // (分时有指标卡/日K无说明行), 保证 setOption 一次布局到位。
+    // 容差 1px 避免亚像素 (如 718.5 vs 718) 触发无意义的 resize。
+    // 注意: 弹窗实例不挂 ResizeObserver —— RO 对隐藏 div (display:none, 0x0)
+    // 的回调会在带 series 的实例上触发完整 update 重跑, echarts 5.6 的
+    // pipeline stub 竞态此时会崩溃 (dataSample 读未挂载的 coordinateSystem);
+    // 窗口缩放由 window resize handler 统一处理 (隐藏实例跳过)
+    const rect = inst.getDom().getBoundingClientRect()
+    if (
+      Math.abs(rect.width - inst.getWidth()) > 1 ||
+      Math.abs(rect.height - inst.getHeight()) > 1
+    ) {
+      inst.resize()
+    }
+    return inst
+  }
+
+  disposeModalChart() {
+    if (this.modalChart) {
+      this.modalChart.dispose()
+      this.modalChart = null
+    }
+    if (this.modalKlineChart) {
+      this.modalKlineChart.dispose()
+      this.modalKlineChart = null
+    }
+  }
+
+  // 个股详情弹窗: 今日分时 (现价 + 均价)
+  renderStockIntraday(d) {
+    if (!this.modalChart || !d) return
+    const up = (d.change_pct || 0) >= 0
+    const lineColor = up ? '#FF4D4F' : '#22C55E'
+    const areaColorStart = up ? 'rgba(255, 77, 79, 0.35)' : 'rgba(34, 197, 94, 0.35)'
+    const areaColorEnd = up ? 'rgba(255, 77, 79, 0.0)' : 'rgba(34, 197, 94, 0.0)'
+
+    // 右轴涨跌幅: 以昨收为基准, 与左轴价格范围对称 (昨收居中), 两轴各分4格, 网格线对齐
+    const pre = d.pre_close || 0
+    const all = [...(d.prices || []), ...(d.avg_prices || [])].filter(v => v > 0)
+    let dev = 0
+    if (pre > 0 && all.length) {
+      dev = Math.max(Math.max(...all) - pre, pre - Math.min(...all)) * 1.02
+    }
+    const hasRightAxis = pre > 0 && dev > 0
+    let yAxis
+    if (hasRightAxis) {
+      const pct = (v) => (v / pre) * 100
+      yAxis = [
+        {
+          type: 'value',
+          min: pre - dev,
+          max: pre + dev,
+          splitNumber: 4,
+          axisLine: { lineStyle: { color: '#4B5563' } },
+          splitLine: { lineStyle: { color: '#1F2937' } }
+        },
+        {
+          type: 'value',
+          min: pct(-dev),
+          max: pct(dev),
+          splitNumber: 4,
+          position: 'right',
+          axisLine: { show: false },
+          splitLine: { show: false },
+          axisLabel: { formatter: (v) => (v > 0 ? '+' : '') + v.toFixed(2) + '%' }
+        }
+      ]
+    } else {
+      yAxis = {
+        type: 'value',
+        scale: true,
+        axisLine: { lineStyle: { color: '#4B5563' } },
+        splitLine: { lineStyle: { color: '#1F2937' } }
+      }
+    }
+
+    const option = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params) => {
+          const t = params[0].axisValue
+          let html = t
+          for (const p of params) {
+            const v = p.value
+            const pct = pre > 0 && v != null ? ((v - pre) / pre * 100).toFixed(2) : null
+            html += `<br/>${p.marker}${p.seriesName}: ${v != null ? v.toFixed(2) : '-'}${pct != null ? ' (' + (pct > 0 ? '+' : '') + pct + '%)' : ''}`
+          }
+          return html
+        }
+      },
+      grid: { top: 10, bottom: 24, left: 55, right: hasRightAxis ? 52 : 20 },
+      xAxis: {
+        type: 'category',
+        data: d.timestamps,
+        axisLine: { lineStyle: { color: '#4B5563' } }
+      },
+      yAxis,
+      series: [
+        {
+          name: '现价',
+          type: 'line',
+          data: d.prices,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: lineColor, width: 2 },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: areaColorStart },
+              { offset: 1, color: areaColorEnd }
+            ])
+          },
+          // 昨收基准线 (即右轴 0%)
+          markLine: hasRightAxis ? {
+            symbol: 'none',
+            silent: true,
+            label: { show: false },
+            lineStyle: { color: '#6B7280', type: 'dashed', width: 1 },
+            data: [{ yAxis: pre }]
+          } : undefined
+        },
+        {
+          name: '均价',
+          type: 'line',
+          data: d.avg_prices,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#FBBF24', width: 1, type: 'dashed' }
+        }
+      ]
+    }
+    this.modalChart.setOption(option)
+  }
+
+  // 个股详情弹窗: 120日K线 (蜡烛图 + 成交量)
+  renderStockKline(d) {
+    if (!this.modalKlineChart || !d) return
+    const option = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' }
+      },
+      grid: [
+        { top: 10, bottom: 110, left: 55, right: 20 },
+        { top: '75%', bottom: 24, left: 55, right: 20 }
+      ],
+      xAxis: [
+        {
+          type: 'category',
+          data: d.timestamps,
+          gridIndex: 0,
+          axisLine: { lineStyle: { color: '#4B5563' } },
+          axisLabel: { show: false }
+        },
+        {
+          type: 'category',
+          data: d.timestamps,
+          gridIndex: 1,
+          axisLine: { lineStyle: { color: '#4B5563' } }
+        }
+      ],
+      yAxis: [
+        {
+          type: 'value',
+          scale: true,
+          gridIndex: 0,
+          splitLine: { lineStyle: { color: '#1F2937' } }
+        },
+        {
+          type: 'value',
+          gridIndex: 1,
+          splitLine: { show: false },
+          axisLabel: { show: false }
+        }
+      ],
+      dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 65, end: 100 }],
+      series: [
+        {
+          name: '日K',
+          type: 'candlestick',
+          data: d.timestamps.map((_, i) => [d.open[i], d.close[i], d.low[i], d.high[i]]),
+          itemStyle: {
+            color: '#FF4D4F',
+            color0: '#22C55E',
+            borderColor: '#FF4D4F',
+            borderColor0: '#22C55E'
+          }
+        },
+        {
+          name: '成交量',
+          type: 'bar',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: d.close.map((c, i) => ({
+            value: d.volume[i],
+            itemStyle: { color: c >= d.open[i] ? 'rgba(255,77,79,0.7)' : 'rgba(34,197,94,0.7)' }
+          }))
+        }
+      ]
+    }
+    this.modalKlineChart.setOption(option)
+  }
 
 
 
@@ -250,5 +476,6 @@ export class ChartEngine {
       this.pieChart.dispose()
       this.pieChart = null
     }
+    this.disposeModalChart()
   }
 }
